@@ -58,6 +58,7 @@ class ProductController extends Controller
         $branches = $multiBranch ? \App\Models\Branch::active()->ordered()->get() : collect();
         $defaultBranchIds = $branches->pluck('id')->all();
         $suppliers = Supplier::active()->orderBy('name')->get();
+        $catalogAddons = \App\Models\Addon::ordered()->get();
 
         return view('admin.products.create', compact(
             'categories',
@@ -67,7 +68,8 @@ class ProductController extends Controller
             'branches',
             'multiBranch',
             'defaultBranchIds',
-            'suppliers'
+            'suppliers',
+            'catalogAddons'
         ));
     }
 
@@ -158,8 +160,21 @@ class ProductController extends Controller
         }
 
         $addonCount = 0;
+        $sharedIds = collect($request->input('shared_addon_ids', []))->filter()->map(fn ($id) => (int) $id)->unique()->values();
         foreach ($request->input('addons', []) as $addon) {
             if (! empty($addon['name'])) {
+                $shared = \App\Models\Addon::firstOrCreate(
+                    [
+                        'name' => $addon['name'],
+                        'price' => (float) ($addon['price'] ?? 0),
+                    ],
+                    [
+                        'is_active' => true,
+                        'display_order' => 0,
+                    ]
+                );
+                $sharedIds->push($shared->id);
+                // Keep legacy row for backward compatibility during transition
                 ProductAddon::create([
                     'product_id' => $product->id,
                     'name' => $addon['name'],
@@ -169,6 +184,8 @@ class ProductController extends Controller
                 $addonCount++;
             }
         }
+        $product->sharedAddons()->sync($sharedIds->unique()->values()->all());
+        $addonCount = max($addonCount, $sharedIds->count());
 
         if ($variantCount || $addonCount) {
             $product->update([
@@ -191,7 +208,7 @@ class ProductController extends Controller
 
     public function edit(Product $product)
     {
-        $product->load('variants', 'addons', 'partnerPrices', 'branches', 'suppliers');
+        $product->load('variants', 'addons', 'sharedAddons', 'partnerPrices', 'branches', 'suppliers');
         $categories = Category::active()->get();
         $subcategories = Subcategory::where('category_id', $product->category_id)->active()->get();
         $deliveryPartners = DeliveryPartner::active()->orderBy('name')->get();
@@ -202,6 +219,8 @@ class ProductController extends Controller
             : $branches->pluck('id')->all();
         $suppliers = Supplier::active()->orderBy('name')->get();
         $defaultSupplierIds = $product->suppliers->pluck('id')->all();
+        $catalogAddons = \App\Models\Addon::ordered()->get();
+        $selectedSharedAddonIds = $product->sharedAddons->pluck('id')->all();
 
         return view('admin.products.edit', compact(
             'product',
@@ -212,7 +231,9 @@ class ProductController extends Controller
             'multiBranch',
             'defaultBranchIds',
             'suppliers',
-            'defaultSupplierIds'
+            'defaultSupplierIds',
+            'catalogAddons',
+            'selectedSharedAddonIds'
         ));
     }
 
@@ -302,11 +323,12 @@ class ProductController extends Controller
         }
         $product->variants()->whereNotIn('id', $keepVariantIds)->delete();
 
-        // Sync add-ons
+        // Sync add-ons (legacy rows + shared catalog assignment)
         $addonRows = collect($request->input('addons', []))
             ->filter(fn ($a) => ! empty($a['name']))
             ->values();
         $keepAddonIds = [];
+        $sharedIds = collect($request->input('shared_addon_ids', []))->filter()->map(fn ($id) => (int) $id)->unique()->values();
         foreach ($addonRows as $addon) {
             if (! empty($addon['id'])) {
                 $existing = $product->addons()->where('id', $addon['id'])->first();
@@ -317,6 +339,11 @@ class ProductController extends Controller
                         'is_active' => true,
                     ]);
                     $keepAddonIds[] = $existing->id;
+                    $shared = \App\Models\Addon::firstOrCreate(
+                        ['name' => $addon['name'], 'price' => (float) ($addon['price'] ?? 0)],
+                        ['is_active' => true, 'display_order' => 0]
+                    );
+                    $sharedIds->push($shared->id);
                     continue;
                 }
             }
@@ -327,12 +354,18 @@ class ProductController extends Controller
                 'is_active' => true,
             ]);
             $keepAddonIds[] = $created->id;
+            $shared = \App\Models\Addon::firstOrCreate(
+                ['name' => $addon['name'], 'price' => (float) ($addon['price'] ?? 0)],
+                ['is_active' => true, 'display_order' => 0]
+            );
+            $sharedIds->push($shared->id);
         }
         $product->addons()->whereNotIn('id', $keepAddonIds)->delete();
+        $product->sharedAddons()->sync($sharedIds->unique()->values()->all());
 
         $product->update([
             'has_variants' => $product->variants()->exists(),
-            'has_addons' => $product->addons()->exists(),
+            'has_addons' => $product->sharedAddons()->exists() || $product->addons()->exists(),
         ]);
 
         return redirect()->route('products.index')->with('success', 'Product updated.');

@@ -5,9 +5,11 @@ namespace App\Http\Controllers\Kitchen;
 use App\Http\Controllers\Controller;
 use App\Models\CashRegister;
 use App\Models\KitchenOrder;
+use App\Models\KitchenOrderItem;
 use App\Models\Kitchen;
 use App\Models\Setting;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class KitchenDisplayController extends Controller
 {
@@ -43,7 +45,7 @@ class KitchenDisplayController extends Controller
 
         $kitchenId = $request->get('kitchen_id');
 
-        $query = KitchenOrder::with(['order.table', 'order.waiter', 'items'])
+        $query = KitchenOrder::with(['order.table', 'order.waiter', 'items.orderItem.addons'])
             ->whereIn('status', ['pending', 'preparing'])
             ->onLiveBoard()
             ->orderByDesc('created_at');
@@ -62,12 +64,19 @@ class KitchenDisplayController extends Controller
                 'waiter_name' => $kot->order?->waiter?->name,
                 'waiter_id' => $kot->order?->waiter_id,
                 'status' => $kot->status,
-                'items' => $kot->items->map(function ($item) {
+                'items' => $kot->items->sortBy('id')->values()->map(function ($item) {
+                    $addons = ($item->orderItem?->addons ?? collect())->map(fn ($a) => [
+                        'name' => $a->addon_name,
+                        'price' => (float) $a->price,
+                    ])->values()->all();
+
                     return [
                         'id' => $item->id,
                         'name' => $item->product_name,
                         'quantity' => $item->quantity,
                         'instructions' => $item->special_instructions,
+                        'addons' => $addons,
+                        'status' => $item->status,
                     ];
                 }),
                 'created_at' => $kot->created_at->format('H:i:s'),
@@ -80,17 +89,25 @@ class KitchenDisplayController extends Controller
 
     public function markReady(Request $request, KitchenOrder $kitchenOrder)
     {
+        // Item-by-item: reuse this existing route so cPanel works without new routes / artisan.
+        if ($request->filled('item_id')) {
+            return $this->markItemReady($request, $kitchenOrder);
+        }
+
         $kitchenOrder->update(['status' => 'ready', 'completed_at' => now()]);
 
-        $kitchenOrder->items()->update([
-            'status' => 'ready',
-            'completed_at' => now(),
-        ]);
+        $kitchenOrder->items()
+            ->whereNotIn('status', ['ready', 'served'])
+            ->update([
+                'status' => 'ready',
+                'completed_at' => now(),
+            ]);
 
         $this->syncParentOrderStatus($kitchenOrder->order_id);
 
         return response()->json([
             'success' => true,
+            'ticket_ready' => true,
             'message' => 'Order marked as ready — waiter & cashier notified',
             'order_id' => $kitchenOrder->order_id,
             'kot_number' => $kitchenOrder->kot_number,
@@ -100,12 +117,17 @@ class KitchenDisplayController extends Controller
 
     public function markStarted(Request $request, KitchenOrder $kitchenOrder)
     {
-        $kitchenOrder->update(['status' => 'preparing', 'started_at' => now()]);
+        if (! in_array($kitchenOrder->status, ['pending', 'preparing'], true)) {
+            return response()->json(['success' => false, 'message' => 'Ticket is not active'], 422);
+        }
 
-        $kitchenOrder->items()->update([
+        $kitchenOrder->update([
             'status' => 'preparing',
-            'started_at' => now(),
+            'started_at' => $kitchenOrder->started_at ?? now(),
         ]);
+
+        // Item-by-item workflow: only the next incomplete line becomes active.
+        $this->activateNextItem($kitchenOrder);
 
         if ($kitchenOrder->order && in_array($kitchenOrder->order->status, ['pending', 'confirmed'], true)) {
             $kitchenOrder->order->update(['status' => 'preparing']);
@@ -113,8 +135,133 @@ class KitchenDisplayController extends Controller
 
         return response()->json([
             'success' => true,
-            'message' => 'Order started — preparing',
+            'message' => 'Order started — prepare items one by one',
         ]);
+    }
+
+    /**
+     * Complete a single KitchenOrderItem. Parent BOT/KOT stays preparing until
+     * every item on that ticket is ready — order / ticket relationship unchanged.
+     *
+     * POST /kitchen/orders/{kitchenOrder}/item-ready  body: item_id
+     */
+    public function markItemReady(Request $request, KitchenOrder $kitchenOrder)
+    {
+        $request->validate([
+            'item_id' => 'required|integer',
+        ]);
+
+        $item = KitchenOrderItem::where('id', (int) $request->input('item_id'))
+            ->where('kitchen_order_id', $kitchenOrder->id)
+            ->first();
+
+        if (! $item) {
+            return response()->json(['success' => false, 'message' => 'Item not found on this ticket'], 404);
+        }
+
+        if (! in_array($kitchenOrder->status, ['pending', 'preparing'], true)) {
+            return response()->json(['success' => false, 'message' => 'Ticket is not active'], 422);
+        }
+
+        if (in_array($item->status, ['ready', 'served'], true)) {
+            return response()->json(['success' => false, 'message' => 'Item already completed'], 422);
+        }
+
+        $nextItem = $this->nextIncompleteItem($kitchenOrder);
+        if (! $nextItem || (int) $nextItem->id !== (int) $item->id) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Complete the current active item first',
+            ], 422);
+        }
+
+        $ticketReady = false;
+
+        DB::transaction(function () use ($kitchenOrder, $item, &$ticketReady) {
+            if ($kitchenOrder->status === 'pending') {
+                $kitchenOrder->update([
+                    'status' => 'preparing',
+                    'started_at' => $kitchenOrder->started_at ?? now(),
+                ]);
+            }
+
+            if ($kitchenOrder->order && in_array($kitchenOrder->order->status, ['pending', 'confirmed'], true)) {
+                $kitchenOrder->order->update(['status' => 'preparing']);
+            }
+
+            $startedAt = $item->started_at ?? now();
+            $completedAt = now();
+            $item->update([
+                'status' => 'ready',
+                'started_at' => $startedAt,
+                'completed_at' => $completedAt,
+                'prep_time_seconds' => $startedAt->diffInSeconds($completedAt),
+            ]);
+
+            $hasRemaining = $kitchenOrder->items()
+                ->whereNotIn('status', ['ready', 'served'])
+                ->exists();
+
+            if ($hasRemaining) {
+                $this->activateNextItem($kitchenOrder);
+            } else {
+                $kitchenOrder->update([
+                    'status' => 'ready',
+                    'completed_at' => $completedAt,
+                    'started_at' => $kitchenOrder->started_at ?? $startedAt,
+                ]);
+                $ticketReady = true;
+            }
+        });
+
+        if ($ticketReady) {
+            $this->syncParentOrderStatus($kitchenOrder->order_id);
+        }
+
+        $kitchenOrder->load('order');
+
+        return response()->json([
+            'success' => true,
+            'ticket_ready' => $ticketReady,
+            'message' => $ticketReady
+                ? 'All items ready — waiter & cashier notified'
+                : 'Item completed — next item is now active',
+            'order_id' => $kitchenOrder->order_id,
+            'kot_number' => $kitchenOrder->kot_number,
+            'waiter_id' => $kitchenOrder->order?->waiter_id,
+            'item_id' => $item->id,
+        ]);
+    }
+
+    /** First incomplete line on this ticket (stable order by id). */
+    protected function nextIncompleteItem(KitchenOrder $kitchenOrder): ?KitchenOrderItem
+    {
+        return $kitchenOrder->items()
+            ->whereNotIn('status', ['ready', 'served'])
+            ->orderBy('id')
+            ->first();
+    }
+
+    /** Mark only the next pending/incomplete line as preparing. */
+    protected function activateNextItem(KitchenOrder $kitchenOrder): void
+    {
+        $next = $this->nextIncompleteItem($kitchenOrder);
+        if (! $next) {
+            return;
+        }
+
+        if ($next->status !== 'preparing') {
+            $next->update([
+                'status' => 'preparing',
+                'started_at' => $next->started_at ?? now(),
+            ]);
+        }
+
+        // Legacy Start marked every line preparing — demote the rest so only one is active.
+        $kitchenOrder->items()
+            ->where('id', '!=', $next->id)
+            ->where('status', 'preparing')
+            ->update(['status' => 'pending']);
     }
 
     public function markServed(Request $request, KitchenOrder $kitchenOrder)

@@ -56,6 +56,7 @@
     <table>
         <tr><td>Opening cash</td><td class="right">{{ $currency }} {{ $fmt($register->opening_balance) }}</td></tr>
         <tr><td>Cash Sales</td><td class="right">{{ $currency }} {{ $fmt($register->cash_sales) }}</td></tr>
+        <tr><td>Cash Refunds</td><td class="right">-{{ $currency }} {{ $fmt($register->cash_refunds ?? 0) }}</td></tr>
         <tr><td>Cash In</td><td class="right">{{ $currency }} {{ $fmt($register->cash_in) }}</td></tr>
         <tr><td>Cash Out</td><td class="right">-{{ $currency }} {{ $fmt($register->cash_out) }}</td></tr>
         <tr class="bold"><td>Expected</td><td class="right">{{ $currency }} {{ $fmt($register->expected_cash) }}</td></tr>

@@ -53,6 +53,7 @@
     <table>
         <tr><td>Opening</td><td class="right">{{ $currency }} {{ $fmt($register->opening_balance) }}</td></tr>
         <tr><td>Cash Sales</td><td class="right">{{ $currency }} {{ $fmt($register->cash_sales) }}</td></tr>
+        <tr><td>Cash Refunds</td><td class="right">-{{ $currency }} {{ $fmt($register->cash_refunds ?? 0) }}</td></tr>
         <tr><td>Cash In</td><td class="right">{{ $currency }} {{ $fmt($register->cash_in) }}</td></tr>
         <tr><td>Cash Out</td><td class="right">-{{ $currency }} {{ $fmt($register->cash_out) }}</td></tr>
         <tr class="bold"><td>Expected</td><td class="right">{{ $currency }} {{ $fmt($register->expected_cash) }}</td></tr>
@@ -63,6 +64,14 @@
             <td class="right">{{ ($diff >= 0 ? '+' : '-') . $currency . ' ' . $fmt(abs($diff)) }}</td>
         </tr>
         @endif
+    </table>
+
+    <div class="line"></div>
+    <div class="bold">OTHER</div>
+    <table>
+        <tr><td>Card (incl. surcharge)</td><td class="right">{{ $currency }} {{ $fmt($register->card_sales) }}</td></tr>
+        <tr><td>Bank / Online / Credit</td><td class="right">{{ $currency }} {{ $fmt((float)$register->bank_transfer_sales + (float)$register->online_sales + (float)$register->credit_sales) }}</td></tr>
+        <tr class="bold"><td>Shift Total</td><td class="right">{{ $currency }} {{ $fmt($register->total_sales) }}</td></tr>
     </table>
 
     <div class="line"></div>

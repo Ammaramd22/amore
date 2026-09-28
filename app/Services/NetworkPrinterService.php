@@ -14,7 +14,7 @@ class NetworkPrinterService
      */
     public function printKitchenOrder(KitchenOrder $kitchenOrder): array
     {
-        $kitchenOrder->loadMissing(['order.table', 'order.waiter', 'order.cashier', 'items', 'kitchen']);
+        $kitchenOrder->loadMissing(['order.table', 'order.waiter', 'order.cashier', 'items.orderItem.addons', 'kitchen']);
 
         $kitchen = $kitchenOrder->kitchen;
         $resolved = \App\Models\Kitchen::resolvePrinterForKitchenOrder($kitchen, (string) $kitchenOrder->type);
@@ -86,7 +86,7 @@ class NetworkPrinterService
     /** Raw ESC/POS bytes for a kitchen ticket (Print Bridge). */
     public function escPosKitchenPayload(KitchenOrder $kitchenOrder): string
     {
-        $kitchenOrder->loadMissing(['order.table', 'order.waiter', 'order.cashier', 'items', 'kitchen']);
+        $kitchenOrder->loadMissing(['order.table', 'order.waiter', 'order.cashier', 'items.orderItem.addons', 'kitchen']);
 
         return $this->buildEscPosTicket($kitchenOrder);
     }
@@ -242,6 +242,15 @@ class NetworkPrinterService
             }
             foreach ($wrapped as $i => $wLine) {
                 $out .= ($i === 0 ? '' : '   ').$wLine."\n";
+            }
+            $addons = $item->relationLoaded('orderItem')
+                ? ($item->orderItem?->addons ?? collect())
+                : ($item->orderItem()?->with('addons')->first()?->addons ?? collect());
+            foreach ($addons as $addon) {
+                $addonLine = '+ '.(string) ($addon->addon_name ?? 'Addon');
+                foreach ($this->wrapLines($addonLine, $width - 2) as $aLine) {
+                    $out .= '  '.$aLine."\n";
+                }
             }
             if ($item->special_instructions) {
                 foreach ($this->wrapLines('NOTE: '.(string) $item->special_instructions, $width - 2) as $noteLine) {
@@ -629,6 +638,8 @@ class NetworkPrinterService
             $out .= $this->pair('TOTAL SALES', $this->safeEscPosText($fmt($register->total_sales)), $width)."\n";
             $out .= str_repeat('-', $width)."\n";
             $out .= $this->pair('Opening', $this->safeEscPosText($fmt($register->opening_balance)), $width)."\n";
+            $out .= $this->pair('Cash Sales', $this->safeEscPosText($fmt($register->cash_sales)), $width)."\n";
+            $out .= $this->pair('Cash Refunds', $this->safeEscPosText('-'.$fmt($register->cash_refunds ?? 0)), $width)."\n";
             $out .= $this->pair('Cash In', $this->safeEscPosText($fmt($register->cash_in)), $width)."\n";
             $out .= $this->pair('Cash Out', $this->safeEscPosText('-'.$fmt($register->cash_out)), $width)."\n";
             $out .= $this->pair('Expected', $this->safeEscPosText($fmt($register->expected_cash)), $width)."\n";
@@ -638,6 +649,12 @@ class NetworkPrinterService
                 $diffLabel = ($diff >= 0 ? '+' : '-').$fmt(abs($diff));
                 $out .= $this->pair('Difference', $this->safeEscPosText($diffLabel), $width)."\n";
             }
+            $out .= str_repeat('-', $width)."\n";
+            $out .= $this->pair('Card (incl. surchg)', $this->safeEscPosText($fmt($register->card_sales)), $width)."\n";
+            $out .= $this->pair('Other methods', $this->safeEscPosText($fmt(
+                (float) $register->bank_transfer_sales + (float) $register->online_sales + (float) $register->credit_sales
+            )), $width)."\n";
+            $out .= $this->pair('Shift Total', $this->safeEscPosText($fmt($register->total_sales)), $width)."\n";
         }
 
         $out .= str_repeat('=', $width)."\n"."\x1B\x61\x01";
@@ -1010,9 +1027,16 @@ class NetworkPrinterService
         if ((float) $order->delivery_charge > 0) {
             $out .= $this->pair('Delivery', number_format((float) $order->delivery_charge, 2), $width)."\n";
         }
+        if ((float) ($order->rounding_amount ?? 0) != 0.0) {
+            $out .= $this->pair('Rounding', number_format((float) $order->rounding_amount, 2), $width)."\n";
+        }
+        if ((float) ($order->card_surcharge_amount ?? 0) > 0) {
+            $out .= $this->pair('Card surcharge', number_format((float) $order->card_surcharge_amount, 2), $width)."\n";
+        }
 
         $out .= "\x1D\x21\x01";
-        $out .= $this->pair('TOTAL', number_format((float) $order->total_amount, 2), $width)."\n";
+        $grandTotal = (float) $order->total_amount + (float) ($order->card_surcharge_amount ?? 0);
+        $out .= $this->pair('TOTAL', number_format($grandTotal, 2), $width)."\n";
         $out .= "\x1D\x21\x00";
 
         $byMethod = $payments->groupBy('method')->map(fn ($rows) => (float) $rows->sum('amount'));

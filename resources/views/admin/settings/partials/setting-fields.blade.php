@@ -103,6 +103,10 @@
                                 <option value="shift" @selected($setting->value === 'shift')>Shift (per cashier)</option>
                                 <option value="day_end" @selected($setting->value === 'day_end')>Day End (store-wide)</option>
                             </select>
+                        @elseif($setting->key === 'price_rounding_mode')
+                            <select name="{{ $setting->key }}" id="field-{{ $setting->key }}" class="form-select">
+                                <option value="up" @selected(($setting->value ?: 'up') === 'up')>Up (ceil)</option>
+                            </select>
                         @elseif($setting->key === 'business_day_cutoff')
                             <input type="time"
                                    name="{{ $setting->key }}"

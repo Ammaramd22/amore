@@ -918,6 +918,22 @@
                         </a>
                     </li>
                     @endcan
+                    @can('subcategories.view')
+                    <li class="nav-item">
+                        <a href="{{ route('subcategories.index') }}" class="nav-link {{ request()->routeIs('subcategories.*') ? 'active' : '' }}">
+                            <i class="nav-icon fas fa-sitemap"></i>
+                            <p>Subcategories</p>
+                        </a>
+                    </li>
+                    @endcan
+                    @can('addons.view')
+                    <li class="nav-item">
+                        <a href="{{ route('addons.index') }}" class="nav-link {{ request()->routeIs('addons.*') ? 'active' : '' }}">
+                            <i class="nav-icon fas fa-plus-circle"></i>
+                            <p>Add-ons</p>
+                        </a>
+                    </li>
+                    @endcan
                     @can('recipes.view')
                     <li class="nav-item">
                         <a href="{{ route('recipes.index') }}" class="nav-link {{ request()->routeIs('recipes.*') ? 'active' : '' }}">

@@ -138,6 +138,12 @@
         <div class="line"></div>
         @foreach($kot->items as $item)
         <div class="kot-item">{{ rtrim(rtrim(number_format((float) $item->quantity, 3, '.', ''), '0'), '.') }}x {{ $item->product_name }}</div>
+        @php
+            $kotAddons = $item->orderItem?->addons ?? collect();
+        @endphp
+        @foreach($kotAddons as $addon)
+        <div class="kot-note">+ {{ $addon->addon_name }}@if((float) $addon->price > 0) ({{ number_format((float) $addon->price, 2) }})@endif</div>
+        @endforeach
         @if($item->special_instructions)
         <div class="kot-note">NOTE: {{ $item->special_instructions }}</div>
         @endif

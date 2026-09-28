@@ -59,6 +59,14 @@ let taxRate = {{ $settings['tax_enabled'] ? $settings['tax_rate'] : 0 }};
 let taxName = @json($settings['tax_name'] ?? 'VAT');
 let serviceChargeRate = {{ $settings['service_charge_rate'] }};
 let serviceChargeEnabled = {{ $settings['service_charge_enabled'] ? 'true' : 'false' }};
+let priceRoundingEnabled = {{ !empty($settings['price_rounding_enabled']) ? 'true' : 'false' }};
+let priceRoundingMode = @json($settings['price_rounding_mode'] ?? 'up');
+let priceRoundingUnit = {{ (float) ($settings['price_rounding_unit'] ?? 1) }};
+let cardSurchargeEnabled = {{ !empty($settings['card_surcharge_enabled']) ? 'true' : 'false' }};
+let cardSurchargePercent = {{ (float) ($settings['card_surcharge_percent'] ?? 3) }};
+let canPosComp = {{ auth()->user()?->can('pos.comp') || auth()->user()?->can('orders.comp') ? 'true' : 'false' }};
+let canPosRefund = {{ auth()->user()?->can('pos.refund') || auth()->user()?->can('orders.refund') ? 'true' : 'false' }};
+let canPosVoid = {{ auth()->user()?->can('pos.void') || auth()->user()?->can('orders.void') ? 'true' : 'false' }};
 let tableSelectionRequired = {{ $settings['table_selection_required'] ? 'true' : 'false' }};
 let currencySymbol = '{{ $settings['currency_symbol'] }}';
 let printAskBefore = {{ !empty($settings['print_ask_before']) ? 'true' : 'false' }};
@@ -753,6 +761,8 @@ function addToCart(productId, name, price, hasVariants, hasAddons, options = {})
         has_options: hasVariants || hasAddons,
         special_instructions: '',
         loyalty_free: false,
+        is_comp: false,
+        comp_reason: '',
     });
     updateCart();
     if (typeof showToast === 'function') showToast('success', name + ' added to cart');
@@ -773,15 +783,16 @@ function getCartItemsHTML() {
         return `
         <div class="cart-item ${locked ? 'cart-item-locked' : ''} ${item.loyalty_free ? 'cart-item-loyalty-free' : ''}">
             <div class="flex-grow-1">
-                <div class="fw-medium">${item.name}${item.loyalty_free ? ' <span class="badge bg-success" style="font-size:0.65rem;">FREE</span>' : ''}${locked && !item.loyalty_free ? ' <span class="badge bg-secondary" style="font-size:0.65rem;">On bill</span>' : (!locked && !item.loyalty_free ? ' <span class="badge bg-success" style="font-size:0.65rem;">New</span>' : '')}</div>
+                <div class="fw-medium">${item.name}${item.is_comp ? ' <span class="badge bg-dark" style="font-size:0.65rem;">COMP</span>' : ''}${item.loyalty_free ? ' <span class="badge bg-success" style="font-size:0.65rem;">FREE</span>' : ''}${locked && !item.loyalty_free && !item.is_comp ? ' <span class="badge bg-secondary" style="font-size:0.65rem;">On bill</span>' : (!locked && !item.loyalty_free && !item.is_comp ? ' <span class="badge bg-success" style="font-size:0.65rem;">New</span>' : '')}</div>
                 ${item.variant_name ? `<div class="text-muted small">${item.variant_name}</div>` : ''}
                 ${(item.addons || []).length ? item.addons.map(a => `<div class="text-muted small">+ ${a.name}</div>`).join('') : ''}
                 ${item.special_instructions ? `<div class="text-muted small"><i class="fas fa-comment-dots me-1"></i>${item.special_instructions}</div>` : ''}
-                ${(item.discount || 0) > 0 ? `<div class="text-danger small mt-1"><i class="fas fa-percent me-1"></i>Item discount −${currencySymbol} ${Number(item.discount).toFixed(2)}</div>` : ''}
-                <div class="text-primary fw-bold mt-1">${item.loyalty_free ? '<span class="text-success">FREE</span> <span class="text-decoration-line-through text-muted small">' + currencySymbol + ' ' + Number(item.original_price || 0).toFixed(2) + '</span>' : (currencySymbol + ' ' + ((item.price + addonTotal) * item.quantity - (item.discount || 0)).toFixed(2))}</div>
+                ${(item.discount || 0) > 0 && !item.is_comp ? `<div class="text-danger small mt-1"><i class="fas fa-percent me-1"></i>Item discount −${currencySymbol} ${Number(item.discount).toFixed(2)}</div>` : ''}
+                <div class="text-primary fw-bold mt-1">${item.is_comp ? '<span class="text-dark">COMP</span>' : (item.loyalty_free ? '<span class="text-success">FREE</span> <span class="text-decoration-line-through text-muted small">' + currencySymbol + ' ' + Number(item.original_price || 0).toFixed(2) + '</span>' : (currencySymbol + ' ' + ((item.price + addonTotal) * item.quantity - (item.discount || 0)).toFixed(2)))}</div>
             </div>
             <div class="d-flex align-items-center gap-2">
-                ${!item.loyalty_free ? `<button type="button" class="qty-btn qty-btn-discount ${(item.discount || 0) > 0 ? 'has-discount' : ''}" title="Item discount" onclick="applyItemDiscount(${index})"><i class="fas fa-percent" style="font-size:0.65rem;"></i></button>` : ''}
+                ${canPosComp && !item.loyalty_free ? `<button type="button" class="qty-btn ${item.is_comp ? 'has-discount' : ''}" title="Comp (free / not discount)" onclick="toggleCartComp(${index})"><i class="fas fa-gift" style="font-size:0.65rem;"></i></button>` : ''}
+                ${!item.loyalty_free && !item.is_comp ? `<button type="button" class="qty-btn qty-btn-discount ${(item.discount || 0) > 0 ? 'has-discount' : ''}" title="Item discount" onclick="applyItemDiscount(${index})"><i class="fas fa-percent" style="font-size:0.65rem;"></i></button>` : ''}
                 ${!item.is_custom_item && !locked ? `<button type="button" class="qty-btn qty-btn-edit" title="Edit size / add-ons" onclick="editCartItemOptions(${index})"><i class="fas fa-pen" style="font-size:0.65rem;"></i></button>` : ''}
                 <button class="qty-btn" onclick="updateQty(${index}, -1)">-</button>
                 <input type="number"
@@ -799,6 +810,38 @@ function getCartItemsHTML() {
             </div>
         </div>`;
     }).join('');
+}
+
+async function toggleCartComp(index) {
+    if (!canPosComp) {
+        showToast('error', 'Not allowed to comp');
+        return;
+    }
+    const item = cart[index];
+    if (!item) return;
+    if (item.is_comp) {
+        item.is_comp = false;
+        item.comp_reason = '';
+        updateCart();
+        return;
+    }
+    let reason = 'Comp';
+    if (typeof Swal !== 'undefined') {
+        const { value, isConfirmed } = await Swal.fire({
+            title: 'Comp this item?',
+            input: 'text',
+            inputLabel: 'Reason',
+            inputValue: 'Comp',
+            showCancelButton: true,
+            confirmButtonText: 'Comp',
+        });
+        if (!isConfirmed) return;
+        reason = (value || 'Comp').trim() || 'Comp';
+    }
+    item.is_comp = true;
+    item.comp_reason = reason;
+    item.discount = 0;
+    updateCart();
 }
 
 function getNewCartItems() {
@@ -1392,13 +1435,23 @@ function clearCart() {
 }
 
 function calculateTotals() {
-    let subtotal = cart.reduce((sum, item) => sum + ((item.price + (item.addons || []).reduce((s,a)=>s+a.price,0)) * item.quantity) - (item.discount || 0), 0);
+    let subtotal = cart.reduce((sum, item) => {
+        if (item.is_comp) return sum;
+        return sum + ((item.price + (item.addons || []).reduce((s,a)=>s+a.price,0)) * item.quantity) - (item.discount || 0);
+    }, 0);
     let discountAmt = billDiscountType === 'percentage' ? subtotal * (billDiscount / 100) : billDiscount;
     let afterDiscount = Math.max(0, subtotal - discountAmt);
     let effectiveTaxRate = (typeof taxEnabled !== 'undefined' && taxEnabled) ? taxRate : 0;
     let tax = afterDiscount * (effectiveTaxRate / 100);
     let serviceCharge = serviceChargeEnabled ? afterDiscount * (serviceChargeRate / 100) : 0;
     let total = afterDiscount + tax + serviceCharge;
+    let roundingAmt = 0;
+    if (priceRoundingEnabled && priceRoundingUnit > 0) {
+        const unit = Number(priceRoundingUnit) || 1;
+        const rounded = Math.ceil((total / unit) - 1e-9) * unit;
+        roundingAmt = Math.round((rounded - total) * 100) / 100;
+        total = Math.round(rounded * 100) / 100;
+    }
 
     const subtotalEl = document.getElementById('subtotal');
     if (subtotalEl) subtotalEl.textContent = 'LKR ' + subtotal.toFixed(2);
@@ -1439,6 +1492,23 @@ function calculateTotals() {
         if (mobileServiceChargeEl) mobileServiceChargeEl.textContent = 'LKR ' + serviceCharge.toFixed(2);
     }
 
+    let roundingRow = document.getElementById('roundingRow');
+    if (!roundingRow) {
+        const totalRow = document.getElementById('totalAmount')?.closest('.d-flex');
+        if (totalRow && totalRow.parentElement) {
+            roundingRow = document.createElement('div');
+            roundingRow.id = 'roundingRow';
+            roundingRow.className = 'd-flex justify-content-between small text-muted';
+            roundingRow.innerHTML = '<span>Rounding:</span><span id="roundingAmount">LKR 0.00</span>';
+            totalRow.parentElement.insertBefore(roundingRow, totalRow);
+        }
+    }
+    if (roundingRow) {
+        roundingRow.classList.toggle('d-none', Math.abs(roundingAmt) < 0.009);
+        const ra = document.getElementById('roundingAmount');
+        if (ra) ra.textContent = 'LKR ' + roundingAmt.toFixed(2);
+    }
+
     const totalAmountEl = document.getElementById('totalAmount');
     if (totalAmountEl) totalAmountEl.textContent = 'LKR ' + total.toFixed(2);
     const mobileTotalAmountEl = document.getElementById('mobileTotalAmount');
@@ -1452,10 +1522,49 @@ function calculateTotals() {
 }
 
 function filterCategory(catId, btn) {
+    currentCategoryFilter = String(catId);
+    currentSubcategoryFilter = 'all';
     document.querySelectorAll('.category-btn').forEach(b => {
         b.classList.toggle('active', b.dataset.catId === String(catId) || (catId === 'all' && b.dataset.catId === 'all'));
     });
     if (btn) btn.classList.add('active');
+    renderSubcategoryChips(catId);
+    applyProductFilters();
+}
+
+let currentCategoryFilter = 'all';
+let currentSubcategoryFilter = 'all';
+const subcategoryMap = @json($subcategoryMap ?? new \stdClass);
+
+function renderSubcategoryChips(catId) {
+    const wrap = document.getElementById('subcategoryChips');
+    if (!wrap) return;
+    const subs = (catId && catId !== 'all' && subcategoryMap[String(catId)]) ? subcategoryMap[String(catId)] : [];
+    if (!subs.length) {
+        wrap.classList.add('d-none');
+        wrap.innerHTML = '';
+        return;
+    }
+    wrap.classList.remove('d-none');
+    let html = `<button type="button" class="subcategory-chip active" data-sub-id="all" onclick="filterSubcategory('all', this)">All</button>`;
+    subs.forEach(s => {
+        html += `<button type="button" class="subcategory-chip" data-sub-id="${s.id}" onclick="filterSubcategory('${s.id}', this)">${s.name}</button>`;
+    });
+    wrap.innerHTML = html;
+}
+
+function filterSubcategory(subId, btn) {
+    currentSubcategoryFilter = String(subId);
+    document.querySelectorAll('#subcategoryChips .subcategory-chip').forEach(b => {
+        b.classList.toggle('active', b.dataset.subId === String(subId));
+    });
+    if (btn) btn.classList.add('active');
+    applyProductFilters();
+}
+
+function applyProductFilters() {
+    const input = document.getElementById('productSearch');
+    const q = (input?.value || '').trim().toLowerCase();
     document.querySelectorAll('.product-item').forEach(el => {
         // Always keep Custom Item button visible
         if (el.id === 'customItemGridBtn') {
@@ -1463,7 +1572,13 @@ function filterCategory(catId, btn) {
             el.style.setProperty('display', 'block', 'important');
             return;
         }
-        const show = (catId === 'all' || el.dataset.category === String(catId));
+        const name = el.dataset.name || '';
+        const code = el.dataset.code || '';
+        const barcode = el.dataset.barcode || '';
+        const catOk = (currentCategoryFilter === 'all' || el.dataset.category === currentCategoryFilter);
+        const subOk = (currentSubcategoryFilter === 'all' || el.dataset.subcategory === currentSubcategoryFilter);
+        const matchesQuery = !q || name.includes(q) || code.includes(q) || barcode.includes(q);
+        const show = catOk && subOk && matchesQuery;
         el.classList.toggle('is-filtered-out', !show);
         if (show) el.style.removeProperty('display');
         else el.style.setProperty('display', 'none', 'important');
@@ -1520,7 +1635,8 @@ function bakeryQuickPay(method) {
 function searchProducts() {
     const input = document.getElementById('productSearch');
     const q = (input?.value || '').trim().toLowerCase();
-    const activeCat = document.querySelector('.category-btn.active')?.dataset?.catId || 'all';
+    const activeCat = currentCategoryFilter || document.querySelector('.category-btn.active')?.dataset?.catId || 'all';
+    const activeSub = currentSubcategoryFilter || 'all';
     document.querySelectorAll('.product-item').forEach(el => {
         // Always keep Custom Item button visible
         if (el.id === 'customItemGridBtn') {
@@ -1532,8 +1648,9 @@ function searchProducts() {
         const code = el.dataset.code || '';
         const barcode = el.dataset.barcode || '';
         const inCategory = (activeCat === 'all' || el.dataset.category === String(activeCat));
+        const inSubcategory = (activeSub === 'all' || el.dataset.subcategory === String(activeSub));
         const matchesQuery = !q || name.includes(q) || code.includes(q) || barcode.includes(q);
-        const show = inCategory && matchesQuery;
+        const show = inCategory && inSubcategory && matchesQuery;
         el.classList.toggle('is-filtered-out', !show);
         if (show) el.style.removeProperty('display');
         else el.style.setProperty('display', 'none', 'important');
@@ -4084,6 +4201,18 @@ function paymentLinesSum() {
     return paymentLines.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
 }
 
+function estimateCardSurcharge(baseCardAmount) {
+    if (!cardSurchargeEnabled || !(cardSurchargePercent > 0)) return 0;
+    const base = baseCardAmount != null
+        ? Number(baseCardAmount)
+        : paymentLines.filter(p => p.method === 'card').reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
+    return Math.round(base * (cardSurchargePercent / 100) * 100) / 100;
+}
+
+function getPayableWithSurcharge() {
+    return Math.round((getPaymentBillTotal() + estimateCardSurcharge()) * 100) / 100;
+}
+
 function paymentRemaining() {
     return Math.max(0, Math.round((getPaymentBillTotal() - paymentLinesSum()) * 100) / 100);
 }
@@ -4206,23 +4335,38 @@ function renderPaymentLines() {
         return;
     }
     if (wrap) wrap.classList.remove('d-none');
-    box.innerHTML = paymentLines.map(p => `
+    const surcharge = estimateCardSurcharge();
+    box.innerHTML = paymentLines.map(p => {
+        const lineSurcharge = (p.method === 'card' && cardSurchargeEnabled)
+            ? Math.round((Number(p.amount) * (cardSurchargePercent / 100)) * 100) / 100
+            : 0;
+        return `
         <div class="d-flex align-items-center justify-content-between py-2 px-3 mb-2 rounded-3" style="background:#f8fafc;border:1px solid #e2e8f0;">
             <div>
                 <span class="fw-semibold">${paymentMethodLabel(p.method)}</span>
                 <span class="text-muted ms-2">${currencySymbol} ${Number(p.amount).toFixed(2)}</span>
+                ${lineSurcharge > 0 ? `<div class="small text-muted">+ Card ${cardSurchargePercent}% → ${currencySymbol} ${(Number(p.amount) + lineSurcharge).toFixed(2)}</div>` : ''}
             </div>
             <button type="button" class="btn btn-sm btn-link text-danger p-0" onclick="removePaymentLine(${p.id})" title="Remove">&times;</button>
-        </div>
-    `).join('');
+        </div>`;
+    }).join('') + (surcharge > 0.009 ? `
+        <div class="alert alert-warning py-2 px-3 small mb-0 mt-1">
+            Card surcharge (${cardSurchargePercent}%): <strong>${currencySymbol} ${surcharge.toFixed(2)}</strong>
+            · Charged total: <strong>${currencySymbol} ${getPayableWithSurcharge().toFixed(2)}</strong>
+        </div>` : '');
 }
 
 function updatePaymentBalanceUI() {
     const total = getPaymentBillTotal();
+    const surcharge = estimateCardSurcharge();
+    const payable = Math.round((total + surcharge) * 100) / 100;
     const paid = paymentLinesSum();
     const remaining = paymentRemaining();
     const entered = parseFloat(document.getElementById('cashReceived')?.value) || 0;
-    const changeFromLines = Math.max(0, Math.round((paid - total) * 100) / 100);
+    const changeFromLines = Math.max(0, Math.round((paid + surcharge - payable) * 100) / 100);
+
+    const payTotalEl = document.getElementById('paymentTotal');
+    if (payTotalEl) payTotalEl.textContent = currencySymbol + ' ' + payable.toFixed(2);
 
     const remEl = document.getElementById('paymentRemaining');
     const labelEl = document.getElementById('paymentBalanceLabel');
@@ -4230,7 +4374,7 @@ function updatePaymentBalanceUI() {
 
     // Live Balance while typing (overpay = change, still labeled Balance)
     if (remEl) {
-        if (labelEl) labelEl.textContent = 'Balance';
+        if (labelEl) labelEl.textContent = surcharge > 0.009 && remaining <= 0.009 ? 'To charge' : 'Balance';
         if (entered > 0.009 && remaining > 0.009) {
             if (entered + 0.009 >= remaining) {
                 const change = Math.round((entered - remaining) * 100) / 100;
@@ -4247,6 +4391,10 @@ function updatePaymentBalanceUI() {
             remEl.textContent = currencySymbol + ' ' + changeFromLines.toFixed(2);
             remEl.style.color = '#059669';
             remEl.closest('.payment-balance-chip')?.classList.add('is-change');
+        } else if (remaining <= 0.009 && surcharge > 0.009) {
+            remEl.textContent = currencySymbol + ' ' + payable.toFixed(2);
+            remEl.style.color = '#059669';
+            remEl.closest('.payment-balance-chip')?.classList.remove('is-change');
         } else {
             remEl.textContent = currencySymbol + ' ' + remaining.toFixed(2);
             remEl.style.color = remaining > 0.009 ? '#dc2626' : '#059669';
@@ -5307,6 +5455,9 @@ function loadOpenBill(orderId, showToastMsg = true, allowPaid = false) {
                 discount: Number(item.discount_amount || item.discount || 0),
                 has_options: false,
                 special_instructions: item.special_instructions || '',
+                loyalty_free: false,
+                is_comp: !!item.is_comp,
+                comp_reason: item.comp_reason || '',
                 routed_to: item.routed_to,
             }));
 
@@ -5733,15 +5884,59 @@ function loadShiftReport() {
 
             body.innerHTML = `
                 <div class="row g-3">
+                    <div class="col-12"><h6 class="fw-bold text-muted mb-0">Cash</h6></div>
                     <div class="col-6 col-md-4">
                         <div class="p-3 rounded-3 h-100" style="background:#f8fafc;">
-                            <small class="text-muted">Opening Balance</small>
+                            <small class="text-muted">Opening</small>
                             <div class="fw-bold fs-5 mt-1">${money(r.opening_balance)}</div>
                         </div>
                     </div>
                     <div class="col-6 col-md-4">
+                        <div class="p-3 rounded-3 h-100" style="background:#ecfdf5;">
+                            <small class="text-muted">Cash Sales</small>
+                            <div class="fw-bold mt-1">${money(r.cash_sales)}</div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-4">
+                        <div class="p-3 rounded-3 h-100" style="background:#fef2f2;">
+                            <small class="text-muted">Cash Refunds</small>
+                            <div class="fw-bold mt-1">${money(r.cash_refunds || 0)}</div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-4">
                         <div class="p-3 rounded-3 h-100" style="background:#f0fdf4;">
-                            <small class="text-muted">Total Sales</small>
+                            <small class="text-muted">Cash In</small>
+                            <div class="fw-bold mt-1 text-success">+ ${money(r.cash_in)}</div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-4">
+                        <div class="p-3 rounded-3 h-100" style="background:#fef2f2;">
+                            <small class="text-muted">Cash Out</small>
+                            <div class="fw-bold mt-1 text-danger">− ${money(r.cash_out)}</div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-4">
+                        <div class="p-3 rounded-3 h-100" style="background:#fff7ed;border:2px solid #f59e0b;">
+                            <small class="text-muted">Expected</small>
+                            <div class="fw-bold fs-5 mt-1" style="color:#b45309;">${money(r.expected_cash)}</div>
+                        </div>
+                    </div>
+                    <div class="col-12"><h6 class="fw-bold text-muted mb-0 mt-1">Other</h6></div>
+                    <div class="col-6 col-md-4">
+                        <div class="p-3 rounded-3 h-100" style="background:#eff6ff;">
+                            <small class="text-muted">Card (incl. surcharge)</small>
+                            <div class="fw-bold mt-1">${money(r.card_sales)}</div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-4">
+                        <div class="p-3 rounded-3 h-100" style="background:#ecfeff;">
+                            <small class="text-muted">Other methods</small>
+                            <div class="fw-bold mt-1">${money(bankOnline + Number(r.credit_sales || 0))}</div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-4">
+                        <div class="p-3 rounded-3 h-100" style="background:#f0fdf4;">
+                            <small class="text-muted">Shift Total</small>
                             <div class="fw-bold fs-5 mt-1 text-success">${money(r.total_sales)}</div>
                         </div>
                     </div>
@@ -5749,48 +5944,6 @@ function loadShiftReport() {
                         <div class="p-3 rounded-3 h-100" style="background:#fff7ed;">
                             <small class="text-muted">Orders</small>
                             <div class="fw-bold fs-5 mt-1" style="color:#ea580c;">${r.orders_count || 0}</div>
-                        </div>
-                    </div>
-                    <div class="col-6 col-md-3">
-                        <div class="p-3 rounded-3 h-100" style="background:#ecfdf5;">
-                            <small class="text-muted">Cash Sales</small>
-                            <div class="fw-bold mt-1">${money(r.cash_sales)}</div>
-                        </div>
-                    </div>
-                    <div class="col-6 col-md-3">
-                        <div class="p-3 rounded-3 h-100" style="background:#eff6ff;">
-                            <small class="text-muted">Card Sales</small>
-                            <div class="fw-bold mt-1">${money(r.card_sales)}</div>
-                        </div>
-                    </div>
-                    <div class="col-6 col-md-3">
-                        <div class="p-3 rounded-3 h-100" style="background:#ecfeff;">
-                            <small class="text-muted">Bank / Online</small>
-                            <div class="fw-bold mt-1">${money(bankOnline)}</div>
-                        </div>
-                    </div>
-                    <div class="col-6 col-md-3">
-                        <div class="p-3 rounded-3 h-100" style="background:#fef3c7;">
-                            <small class="text-muted">Credit Sales</small>
-                            <div class="fw-bold mt-1">${money(r.credit_sales)}</div>
-                        </div>
-                    </div>
-                    <div class="col-6">
-                        <div class="p-3 rounded-3 h-100" style="background:#f0fdf4;">
-                            <small class="text-muted">Cash In</small>
-                            <div class="fw-bold mt-1 text-success">+ ${money(r.cash_in)}</div>
-                        </div>
-                    </div>
-                    <div class="col-6">
-                        <div class="p-3 rounded-3 h-100" style="background:#fef2f2;">
-                            <small class="text-muted">Cash Out</small>
-                            <div class="fw-bold mt-1 text-danger">− ${money(r.cash_out)}</div>
-                        </div>
-                    </div>
-                    <div class="col-12">
-                        <div class="p-3 rounded-3" style="background:#fff7ed;border:2px solid #f59e0b;">
-                            <small class="text-muted">Expected Cash in Drawer</small>
-                            <div class="fw-bold fs-4 mt-1" style="color:#b45309;">${money(r.expected_cash)}</div>
                         </div>
                     </div>
                 </div>
@@ -6096,12 +6249,13 @@ function viewOrderDetail(orderId) {
             let itemsHtml = order.items.map(item => `
                 <div class="d-flex justify-content-between align-items-center p-2 mb-1" style="background: #f8fafc; border-radius: 8px;">
                     <div>
-                        <div class="fw-semibold">${item.product_name}</div>
+                        <div class="fw-semibold">${item.product_name}${item.is_comp ? ' <span class="badge bg-dark">COMP</span>' : ''}</div>
                         <div class="text-muted small">Qty: ${item.quantity} x LKR ${item.unit_price.toFixed(2)}</div>
                         ${item.addons.length ? `<div class="small text-muted">+ ${item.addons.map(a => a.addon_name).join(', ')}</div>` : ''}
-                        ${(item.discount_amount || item.discount || 0) > 0 ? `<div class="small text-danger fw-semibold">Discount −LKR ${Number(item.discount_amount || item.discount).toFixed(2)}</div>` : ''}
+                        ${(item.discount_amount || item.discount || 0) > 0 && !item.is_comp ? `<div class="small text-danger fw-semibold">Discount −LKR ${Number(item.discount_amount || item.discount).toFixed(2)}</div>` : ''}
+                        ${item.is_comp && item.comp_reason ? `<div class="small text-muted">Comp: ${escHtml(item.comp_reason)}</div>` : ''}
                     </div>
-                    <div class="fw-bold" style="color: #f59e0b;">LKR ${item.total_price.toFixed(2)}</div>
+                    <div class="fw-bold" style="color: #f59e0b;">${item.is_comp ? 'COMP' : ('LKR ' + item.total_price.toFixed(2))}</div>
                 </div>
             `).join('');
 
@@ -6110,6 +6264,7 @@ function viewOrderDetail(orderId) {
                     <span class="badge bg-${order.order_type === 'dine_in' ? 'success' : order.order_type === 'takeaway' ? 'warning text-dark' : 'info'}">${order.order_type.replace('_', ' ')}</span>
                     <span class="badge bg-secondary">${order.status}</span>
                 </div>
+                ${order.is_comp ? `<div class="alert alert-dark py-2 small">COMP bill${order.comp_reason ? ': ' + escHtml(order.comp_reason) : ''}</div>` : ''}
                 <div class="mb-3"><strong>Customer:</strong> ${order.customer_name || 'Walk-in'}</div>
                 ${order.table_name ? `<div class="mb-3"><strong>Table:</strong> ${order.table_name}</div>` : ''}
                 <div class="mb-3"><strong>Waiter:</strong> ${order.waiter_name || '—'}</div>
@@ -6121,14 +6276,17 @@ function viewOrderDetail(orderId) {
                 <div class="d-flex justify-content-between"><span>Subtotal</span><span>LKR ${order.subtotal.toFixed(2)}</span></div>
                 ${taxEnabled ? `<div class="d-flex justify-content-between"><span>${taxName || 'Tax'}</span><span>LKR ${order.tax_amount.toFixed(2)}</span></div>` : ''}
                 ${order.discount_amount > 0 ? `<div class="d-flex justify-content-between"><span>Discount</span><span>-LKR ${order.discount_amount.toFixed(2)}</span></div>` : ''}
+                ${(order.rounding_amount || 0) != 0 ? `<div class="d-flex justify-content-between"><span>Rounding</span><span>LKR ${Number(order.rounding_amount).toFixed(2)}</span></div>` : ''}
+                ${(order.card_surcharge_amount || 0) > 0 ? `<div class="d-flex justify-content-between"><span>Card surcharge</span><span>LKR ${Number(order.card_surcharge_amount).toFixed(2)}</span></div>` : ''}
                 <div class="d-flex justify-content-between fw-bold fs-5 mt-2" style="color: #f59e0b;">
-                    <span>TOTAL</span><span>LKR ${order.total_amount.toFixed(2)}</span>
+                    <span>TOTAL</span><span>LKR ${(Number(order.total_amount) + Number(order.card_surcharge_amount || 0)).toFixed(2)}</span>
                 </div>
             `;
 
             document.getElementById('orderDetailFooter').innerHTML = `
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
                 ${!order.is_void ? `<button type="button" class="btn btn-warning text-white" onclick="editOrder(${order.id})"><i class="fas fa-edit me-2"></i>Edit Order</button>` : ''}
+                ${canPosRefund && order.payment_status === 'paid' && order.status !== 'refunded' ? `<button type="button" class="btn btn-outline-danger" onclick="refundOrderPrompt(${order.id}, ${Number(order.total_amount) + Number(order.card_surcharge_amount || 0)})"><i class="fas fa-undo me-2"></i>Refund</button>` : ''}
                 <button type="button" class="btn btn-success" onclick="reprintReceipt(${order.id})"><i class="fas fa-receipt me-2"></i>Reprint Invoice</button>
                 ${order.kitchen_orders.some(k => k.type === 'kitchen') ? `<button type="button" class="btn btn-outline-warning" onclick="reprintKOT(${order.id})"><i class="fas fa-print me-2"></i>KOT</button>` : ''}
                 ${order.kitchen_orders.some(k => k.type === 'bar') ? `<button type="button" class="btn btn-outline-info" onclick="reprintBOT(${order.id})"><i class="fas fa-cocktail me-2"></i>BOT</button>` : ''}
@@ -6137,6 +6295,66 @@ function viewOrderDetail(orderId) {
             const modal = new bootstrap.Modal(document.getElementById('orderDetailModal'));
             modal.show();
         });
+}
+
+function refundOrderPrompt(orderId, maxAmount) {
+    if (!canPosRefund) {
+        showToast('error', 'Not allowed to refund');
+        return;
+    }
+    Swal.fire({
+        title: 'Refund order',
+        html: `
+            <div class="text-start">
+                <label class="form-label small">Amount (max ${Number(maxAmount).toFixed(2)})</label>
+                <input id="refundAmountInput" type="number" class="form-control mb-2" min="0.01" step="0.01" value="${Number(maxAmount).toFixed(2)}">
+                <label class="form-label small">Method</label>
+                <select id="refundMethodSelect" class="form-select mb-2">
+                    <option value="cash">Cash</option>
+                    <option value="card">Card</option>
+                </select>
+                <label class="form-label small">Reason</label>
+                <input id="refundReasonInput" type="text" class="form-control" value="Refund">
+            </div>
+        `,
+        showCancelButton: true,
+        confirmButtonText: 'Refund',
+        confirmButtonColor: '#dc2626',
+        preConfirm: () => {
+            const amount = parseFloat(document.getElementById('refundAmountInput')?.value || '0');
+            const method = document.getElementById('refundMethodSelect')?.value || 'cash';
+            const reason = (document.getElementById('refundReasonInput')?.value || '').trim();
+            if (!(amount > 0)) {
+                Swal.showValidationMessage('Enter a valid amount');
+                return false;
+            }
+            return { amount, method, reason };
+        },
+    }).then(result => {
+        if (!result.isConfirmed || !result.value) return;
+        fetch('/pos/refund', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content },
+            body: JSON.stringify({
+                order_id: orderId,
+                amount: result.value.amount,
+                method: result.value.method,
+                reason: result.value.reason,
+                full: Math.abs(result.value.amount - Number(maxAmount)) < 0.02,
+            }),
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                showToast('success', data.message || 'Refund recorded');
+                bootstrap.Modal.getInstance(document.getElementById('orderDetailModal'))?.hide();
+                if (typeof loadRecentOrders === 'function') loadRecentOrders();
+            } else {
+                showToast('error', data.message || 'Refund failed');
+            }
+        })
+        .catch(() => showToast('error', 'Network error'));
+    });
 }
 
 function reprintReceipt(orderId) {
@@ -6667,16 +6885,11 @@ function showShiftCloseModal() {
             const r = data.register;
             document.getElementById('shiftReport').innerHTML = `
                 <div class="row g-3">
+                    <div class="col-12"><h6 class="fw-bold text-muted mb-0">Cash</h6></div>
                     <div class="col-6">
                         <div class="p-3 rounded-3" style="background: #f8fafc;">
-                            <small class="text-muted">Opening Balance</small>
+                            <small class="text-muted">Opening</small>
                             <h5 class="mb-0">LKR ${parseFloat(r.opening_balance).toFixed(2)}</h5>
-                        </div>
-                    </div>
-                    <div class="col-6">
-                        <div class="p-3 rounded-3" style="background: #f0fdf4;">
-                            <small class="text-muted">Total Sales</small>
-                            <h5 class="mb-0 text-success">LKR ${parseFloat(r.total_sales).toFixed(2)}</h5>
                         </div>
                     </div>
                     <div class="col-6">
@@ -6686,27 +6899,46 @@ function showShiftCloseModal() {
                         </div>
                     </div>
                     <div class="col-6">
+                        <div class="p-3 rounded-3" style="background: #fef2f2;">
+                            <small class="text-muted">Cash Refunds</small>
+                            <h5 class="mb-0">LKR ${parseFloat(r.cash_refunds || 0).toFixed(2)}</h5>
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <div class="p-3 rounded-3" style="background: #f0fdf4;">
+                            <small class="text-muted">Cash In</small>
+                            <h5 class="mb-0 text-success">+ LKR ${parseFloat(r.cash_in).toFixed(2)}</h5>
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <div class="p-3 rounded-3" style="background: #fef2f2;">
+                            <small class="text-muted">Cash Out</small>
+                            <h5 class="mb-0 text-danger">− LKR ${parseFloat(r.cash_out).toFixed(2)}</h5>
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <div class="p-3 rounded-3" style="background: #fff7ed;">
+                            <small class="text-muted">Expected</small>
+                            <h5 class="mb-0 fw-bold text-primary">LKR ${parseFloat(r.expected_cash).toFixed(2)}</h5>
+                        </div>
+                    </div>
+                    <div class="col-12"><h6 class="fw-bold text-muted mb-0 mt-2">Other</h6></div>
+                    <div class="col-6">
                         <div class="p-3 rounded-3" style="background: #eff6ff;">
-                            <small class="text-muted">Card Sales</small>
+                            <small class="text-muted">Card (incl. surcharge)</small>
                             <h5 class="mb-0">LKR ${parseFloat(r.card_sales).toFixed(2)}</h5>
                         </div>
                     </div>
                     <div class="col-6">
                         <div class="p-3 rounded-3" style="background: #ecfeff;">
-                            <small class="text-muted">Bank/Online</small>
-                            <h5 class="mb-0">LKR ${(parseFloat(r.bank_transfer_sales) + parseFloat(r.online_sales)).toFixed(2)}</h5>
-                        </div>
-                    </div>
-                    <div class="col-6">
-                        <div class="p-3 rounded-3" style="background: #fef3c7;">
-                            <small class="text-muted">Credit Sales</small>
-                            <h5 class="mb-0">LKR ${parseFloat(r.credit_sales).toFixed(2)}</h5>
+                            <small class="text-muted">Bank / Online / Credit</small>
+                            <h5 class="mb-0">LKR ${(parseFloat(r.bank_transfer_sales) + parseFloat(r.online_sales) + parseFloat(r.credit_sales)).toFixed(2)}</h5>
                         </div>
                     </div>
                     <div class="col-12">
-                        <div class="p-3 rounded-3" style="background: #fff7ed;">
-                            <small class="text-muted">Expected Cash in Drawer</small>
-                            <h4 class="mb-0 fw-bold text-primary">LKR ${parseFloat(r.expected_cash).toFixed(2)}</h4>
+                        <div class="p-3 rounded-3" style="background: #f0fdf4;">
+                            <small class="text-muted">Shift Total</small>
+                            <h4 class="mb-0 fw-bold text-success">LKR ${parseFloat(r.total_sales).toFixed(2)}</h4>
                         </div>
                     </div>
                 </div>
@@ -7350,13 +7582,14 @@ try { startWaiterOrderAlertPolling(); } catch (_) {}
                 @endunless
 
                 <!-- Products Grid -->
+                <div id="subcategoryChips" class="subcategory-chips mb-2 d-none" role="group" aria-label="Subcategories"></div>
                 <div class="product-grid {{ !empty($isIceCreamUi) ? 'ice-products-4x4' : '' }}"
                      id="productsGrid"
                      @if(!empty($isIceCreamUi))
                      style="display:grid !important;grid-template-columns:repeat(4,minmax(0,1fr)) !important;grid-template-rows:none !important;grid-auto-rows:calc((100% - 24px) / 4) !important;gap:8px !important;height:100% !important;align-content:start !important;"
                      @endif>
                     {{-- CUSTOM ITEM button — always first in grid --}}
-                    <div class="product-item custom-item-grid-btn" id="customItemGridBtn" data-category="custom" data-id="0" data-name="" data-display-name="" data-code="" data-barcode="" data-price="0" data-partner-prices='{}' data-has-variants="0" data-has-addons="0" style="display:block !important;">
+                    <div class="product-item custom-item-grid-btn" id="customItemGridBtn" data-category="custom" data-subcategory="" data-id="0" data-name="" data-display-name="" data-code="" data-barcode="" data-price="0" data-partner-prices='{}' data-has-variants="0" data-has-addons="0" style="display:block !important;">
                         <div class="product-card custom-item-card" onclick="openCustomItemModal()" title="Add a custom item not in the product list">
                             <div class="custom-item-icon"><i class="fas fa-keyboard"></i></div>
                             <div class="product-info">
@@ -7370,6 +7603,7 @@ try { startWaiterOrderAlertPolling(); } catch (_) {}
                         @foreach($category->products as $product)
                         <div class="product-item"
                              data-category="{{ $category->id }}"
+                             data-subcategory="{{ $product->subcategory_id ?? '' }}"
                              data-id="{{ $product->id }}"
                              data-name="{{ strtolower($product->name) }}"
                              data-display-name="{{ $product->name }}"
@@ -7931,6 +8165,7 @@ try { startWaiterOrderAlertPolling(); } catch (_) {}
 
                     <div class="row g-2 mb-2 payment-quick-grid" id="quickPayButtons">
                         <div class="col"><button type="button" class="btn w-100 payment-quick" onclick="quickPay('exact')">Exact</button></div>
+                        <div class="col"><button type="button" class="btn w-100 payment-quick" onclick="quickPay('round')" title="Round cash up to nearest 100">Round</button></div>
                         <div class="col"><button type="button" class="btn w-100 payment-quick" onclick="quickPay('500')">500</button></div>
                         <div class="col"><button type="button" class="btn w-100 payment-quick" onclick="quickPay('1000')">1000</button></div>
                         <div class="col"><button type="button" class="btn w-100 payment-quick" onclick="quickPay('2000')">2000</button></div>
@@ -8011,6 +8246,7 @@ try { startWaiterOrderAlertPolling(); } catch (_) {}
 
                             <div class="row g-2 mb-0 payment-quick-grid" id="quickPayButtons">
                                 <div class="col"><button type="button" class="btn w-100 payment-quick" onclick="quickPay('exact')">Exact</button></div>
+                                <div class="col"><button type="button" class="btn w-100 payment-quick" onclick="quickPay('round')" title="Round cash up to nearest 100">Round</button></div>
                                 <div class="col"><button type="button" class="btn w-100 payment-quick" onclick="quickPay('500')">500</button></div>
                                 <div class="col"><button type="button" class="btn w-100 payment-quick" onclick="quickPay('1000')">1000</button></div>
                                 <div class="col"><button type="button" class="btn w-100 payment-quick" onclick="quickPay('2000')">2000</button></div>
@@ -8598,6 +8834,31 @@ document.getElementById('productOptionsModal')?.addEventListener('hidden.bs.moda
 </div>
 
 <style>
+/* Subcategory filter chips */
+.subcategory-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
+.subcategory-chip {
+    border: 1px solid #d6d3d1;
+    background: #fff;
+    color: #44403c;
+    border-radius: 999px;
+    padding: 6px 12px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+    line-height: 1.2;
+}
+.subcategory-chip:hover { border-color: #f59e0b; color: #c2410c; }
+.subcategory-chip.active {
+    background: #fff7ed;
+    border-color: #f59e0b;
+    color: #c2410c;
+}
+
 /* Custom Item grid card */
 .custom-item-card {
     background: linear-gradient(160deg, #292524, #1c1917) !important;

@@ -61,6 +61,11 @@ class SettingSeeder extends Seeder
             ['key' => 'table_selection_required', 'value' => '0', 'type' => 'boolean', 'group' => 'pos', 'description' => 'Require selecting a table for dine-in orders before payment'],
             ['key' => 'show_screen_numbers_keyboard', 'value' => '1', 'type' => 'boolean', 'group' => 'pos', 'description' => 'Show the on-screen numeric keypad in the POS cart'],
             ['key' => 'shift_method', 'value' => 'shift', 'type' => 'string', 'group' => 'pos', 'description' => 'shift = per cashier, day_end = store-wide day'],
+            ['key' => 'price_rounding_enabled', 'value' => '1', 'type' => 'boolean', 'group' => 'pos', 'description' => 'Round POS bill totals up to the nearest rounding unit'],
+            ['key' => 'price_rounding_mode', 'value' => 'up', 'type' => 'string', 'group' => 'pos', 'description' => 'Rounding mode (up = always round up)'],
+            ['key' => 'price_rounding_unit', 'value' => '1', 'type' => 'float', 'group' => 'pos', 'description' => 'Currency unit to round to (e.g. 1 = nearest 1.00)'],
+            ['key' => 'card_surcharge_enabled', 'value' => '1', 'type' => 'boolean', 'group' => 'pos', 'description' => 'Add a percentage surcharge on card payments'],
+            ['key' => 'card_surcharge_percent', 'value' => '3', 'type' => 'float', 'group' => 'pos', 'description' => 'Card surcharge percent (applied to card portion only)'],
 
             // Bakery UI (software owner)
             ['key' => 'bakery_show_dine_in', 'value' => '1', 'type' => 'boolean', 'group' => 'bakery', 'description' => 'Bakery UI: show Dine-in'],

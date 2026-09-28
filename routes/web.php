@@ -2,6 +2,8 @@
 
 use App\Http\Controllers\Admin\DashboardController;
 use App\Http\Controllers\Admin\CategoryController;
+use App\Http\Controllers\Admin\SubcategoryController;
+use App\Http\Controllers\Admin\AddonController;
 use App\Http\Controllers\Admin\ProductController;
 use App\Http\Controllers\Admin\IngredientController;
 use App\Http\Controllers\Admin\RecipeController;
@@ -120,6 +122,8 @@ Route::middleware(['auth'])->group(function () {
     Route::post('/admin/bulk-delete', [\App\Http\Controllers\Admin\BulkActionController::class, 'destroy'])->name('admin.bulk-delete');
 
     Route::resource('categories', CategoryController::class);
+    Route::resource('subcategories', SubcategoryController::class);
+    Route::resource('addons', AddonController::class);
     Route::get('/products/import/template', [ProductController::class, 'importTemplate'])->name('products.import.template');
     Route::post('/products/import', [ProductController::class, 'import'])->name('products.import');
     Route::get('/products/next-code', [ProductController::class, 'nextCode'])->name('products.next-code');
@@ -273,6 +277,8 @@ Route::middleware(['auth'])->group(function () {
     Route::get('/pos/pay-bills/count', [PosApiController::class, 'payBillsCount'])->name('pos.pay-bills.count');
     Route::post('/pos/settle-order/{order}', [PosApiController::class, 'settleOrder'])->name('pos.settle-order');
     Route::post('/pos/void', [PosApiController::class, 'voidOrder'])->name('pos.void');
+    Route::post('/pos/comp', [PosApiController::class, 'markComp'])->name('pos.comp');
+    Route::post('/pos/refund', [PosApiController::class, 'refundOrder'])->name('pos.refund');
     Route::get('/pos/print-receipt/{order}', [PosApiController::class, 'printReceipt'])->name('pos.print-receipt');
     Route::get('/pos/receipt-escpos/{order}', [PosApiController::class, 'receiptEscPos'])->name('pos.receipt-escpos');
     Route::get('/pos/last-receipt-escpos', [PosApiController::class, 'lastReceiptEscPos'])->name('pos.last-receipt-escpos');
@@ -372,6 +378,7 @@ Route::get('/kitchen/orders', [\App\Http\Controllers\Kitchen\KitchenDisplayContr
 Route::get('/kitchen/ready-orders', [\App\Http\Controllers\Kitchen\KitchenDisplayController::class, 'readyOrders'])->name('kitchen.ready-orders');
 Route::post('/kitchen/orders/{kitchenOrder}/ready', [\App\Http\Controllers\Kitchen\KitchenDisplayController::class, 'markReady'])->name('kitchen.orders.ready');
 Route::post('/kitchen/orders/{kitchenOrder}/started', [\App\Http\Controllers\Kitchen\KitchenDisplayController::class, 'markStarted'])->name('kitchen.orders.started');
+Route::post('/kitchen/orders/{kitchenOrder}/item-ready', [\App\Http\Controllers\Kitchen\KitchenDisplayController::class, 'markItemReady'])->name('kitchen.orders.item-ready');
 Route::post('/kitchen/orders/{kitchenOrder}/served', [\App\Http\Controllers\Kitchen\KitchenDisplayController::class, 'markServed'])->name('kitchen.orders.served');
 
 // Customer Display Screens
@@ -391,6 +398,11 @@ Route::get('/storage/{path}', \App\Http\Controllers\StorageFallbackController::c
 // One-click storage:link for cPanel (requires ?token=…)
 Route::get('/setup/storage-link', \App\Http\Controllers\StorageLinkController::class)
     ->name('setup.storage-link');
+
+// One-click migrate + cache clear for cPanel updates (no Terminal)
+Route::get('/setup/migrate-update', \App\Http\Controllers\SetupMigrateController::class)
+    ->middleware('web')
+    ->name('setup.migrate-update');
 
 Route::get('/qr-menu/{table}', [QrMenuController::class, 'index'])->name('qr.menu');
 Route::post('/qr-menu/{table}/verify', [QrMenuController::class, 'verify'])->name('qr.verify');

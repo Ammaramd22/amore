@@ -589,6 +589,7 @@ class WaiterController extends Controller
             ->when(!$showDirect, fn ($q) => $q->where('type', '!=', 'direct'))
             ->with(['products' => fn ($q) => $q->available()->posVisible()->with([
                 'variants' => fn ($vq) => $vq->active()->orderBy('name'),
+                'sharedAddons' => fn ($aq) => $aq->active()->ordered(),
                 'addons' => fn ($aq) => $aq->active()->orderBy('name'),
             ])])
             ->get()
@@ -602,10 +603,13 @@ class WaiterController extends Controller
                         'name' => $v->name,
                         'price_adjustment' => (float) $v->price_adjustment,
                     ])->values();
-                    $addons = $p->addons->map(fn ($a) => [
+                    $shared = $p->sharedAddons;
+                    $addonsSource = $shared->isNotEmpty() ? $shared : $p->addons;
+                    $addons = $addonsSource->map(fn ($a) => [
                         'id' => $a->id,
                         'name' => $a->name,
                         'price' => (float) $a->price,
+                        'shared' => $shared->isNotEmpty(),
                     ])->values();
 
                     return [
@@ -904,9 +908,14 @@ class WaiterController extends Controller
                 ]);
 
                 foreach ($item['addons'] ?? [] as $addon) {
+                    $addonId = isset($addon['id']) ? (int) $addon['id'] : null;
+                    $useShared = array_key_exists('shared', $addon)
+                        ? (bool) $addon['shared']
+                        : ($addonId > 0 && \App\Models\Addon::whereKey($addonId)->exists());
                     OrderItemAddon::create([
                         'order_item_id' => $orderItem->id,
-                        'product_addon_id' => $addon['id'] ?? null,
+                        'product_addon_id' => $useShared ? null : $addonId,
+                        'addon_id' => $useShared ? $addonId : null,
                         'addon_name' => $addon['name'] ?? 'Addon',
                         'price' => $addon['price'] ?? 0,
                     ]);
@@ -1112,9 +1121,14 @@ class WaiterController extends Controller
                 ]);
 
                 foreach ($item['addons'] ?? [] as $addon) {
+                    $addonId = isset($addon['id']) ? (int) $addon['id'] : null;
+                    $useShared = array_key_exists('shared', $addon)
+                        ? (bool) $addon['shared']
+                        : ($addonId > 0 && \App\Models\Addon::whereKey($addonId)->exists());
                     OrderItemAddon::create([
                         'order_item_id' => $orderItem->id,
-                        'product_addon_id' => $addon['id'] ?? null,
+                        'product_addon_id' => $useShared ? null : $addonId,
+                        'addon_id' => $useShared ? $addonId : null,
                         'addon_name' => $addon['name'] ?? 'Addon',
                         'price' => $addon['price'] ?? 0,
                     ]);

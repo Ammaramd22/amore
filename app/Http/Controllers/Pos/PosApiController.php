@@ -38,10 +38,20 @@ class PosApiController extends Controller
     {
         $categories = \App\Models\Category::active()
             ->posVisible()
-            ->with(['products' => fn($q) => $q->available()->posVisible()->limit(1)])
+            ->with([
+                'products' => fn ($q) => $q->available()->posVisible()->limit(1),
+                'subcategories' => fn ($q) => $q->active()->orderBy('display_order')->orderBy('name'),
+            ])
             ->get()
-            ->filter(fn($c) => $c->products->count() > 0)
-            ->map(fn($c) => ['id' => $c->id, 'name' => $c->name]);
+            ->filter(fn ($c) => $c->products->count() > 0)
+            ->map(fn ($c) => [
+                'id' => $c->id,
+                'name' => $c->name,
+                'subcategories' => $c->subcategories->map(fn ($s) => [
+                    'id' => $s->id,
+                    'name' => $s->name,
+                ])->values(),
+            ]);
 
         return response()->json(['categories' => $categories]);
     }
@@ -54,6 +64,7 @@ class PosApiController extends Controller
 
         $products = Product::with([
             'variants' => fn ($vq) => $vq->active()->orderBy('name'),
+            'sharedAddons' => fn ($aq) => $aq->active()->ordered(),
             'addons' => fn ($aq) => $aq->active()->orderBy('name'),
         ])
             ->available()
@@ -72,10 +83,14 @@ class PosApiController extends Controller
                     'name' => $v->name,
                     'price_adjustment' => (float) $v->price_adjustment,
                 ])->values();
-                $addons = $p->addons->map(fn ($a) => [
+
+                $shared = $p->sharedAddons;
+                $addonsSource = $shared->isNotEmpty() ? $shared : $p->addons;
+                $addons = $addonsSource->map(fn ($a) => [
                     'id' => $a->id,
                     'name' => $a->name,
                     'price' => (float) $a->price,
+                    'shared' => $shared->isNotEmpty(),
                 ])->values();
 
                 return [
@@ -83,6 +98,7 @@ class PosApiController extends Controller
                     'name' => $p->name,
                     'price' => (float) ($p->final_price ?? $p->selling_price ?? $p->price ?? 0),
                     'category_id' => $p->category_id,
+                    'subcategory_id' => $p->subcategory_id,
                     'image' => $p->imageUrl(),
                     'has_variants' => $variants->isNotEmpty() || (bool) $p->has_variants,
                     'has_addons' => $addons->isNotEmpty() || (bool) $p->has_addons,
@@ -366,6 +382,8 @@ class PosApiController extends Controller
             'items.*.name' => 'nullable|string|max:255',
             'items.*.discount' => 'nullable|numeric|min:0',
             'items.*.discount_amount' => 'nullable|numeric|min:0',
+            'items.*.is_comp' => 'nullable|boolean',
+            'items.*.comp_reason' => 'nullable|string|max:255',
             'customer_name' => 'nullable|string|max:255',
             'customer_phone' => 'nullable|string|max:30',
         ]);
@@ -428,24 +446,33 @@ class PosApiController extends Controller
             $tax = $afterDiscount * ($taxRate / 100);
             $serviceCharge = $afterDiscount * (($data['service_charge'] ?? 0) / 100);
             $total = $afterDiscount + $tax + $serviceCharge;
+            $rounded = $this->applyPriceRounding($total);
+            $total = $rounded['total'];
+            $roundingAmount = $rounded['rounding_amount'];
 
             $paymentLines = [];
             $paidSum = 0.0;
             $change = 0.0;
             $paymentStatus = 'paid';
+            $cardSurchargeAmount = 0.0;
 
             if ($isCod) {
                 $paymentStatus = 'unpaid';
             } else {
                 $paymentLines = $this->normalizePaymentLines($data, $total);
-                $paidSum = round(collect($paymentLines)->sum('amount'), 2);
-                if ($paidSum + 0.009 < $total) {
+                $paidBase = round(collect($paymentLines)->sum('amount'), 2);
+                if ($paidBase + 0.009 < $total) {
                     return response()->json([
                         'success' => false,
-                        'message' => 'Payments (' . number_format($paidSum, 2) . ') are less than total (' . number_format($total, 2) . ')',
+                        'message' => 'Payments (' . number_format($paidBase, 2) . ') are less than total (' . number_format($total, 2) . ')',
                     ], 422);
                 }
-                $change = max(0, $paidSum - $total);
+                $surcharged = $this->applyCardSurchargeToLines($paymentLines);
+                $paymentLines = $surcharged['lines'];
+                $cardSurchargeAmount = $surcharged['surcharge'];
+                $paidSum = round(collect($paymentLines)->sum('amount'), 2);
+                $payable = round($total + $cardSurchargeAmount, 2);
+                $change = max(0, $paidSum - $payable);
             }
 
             // Get current register
@@ -466,6 +493,8 @@ class PosApiController extends Controller
                 'tax_amount' => $tax,
                 'service_charge' => $serviceCharge,
                 'discount_amount' => $discount,
+                'rounding_amount' => $roundingAmount,
+                'card_surcharge_amount' => $cardSurchargeAmount,
                 'total_amount' => $total,
                 'paid_amount' => $paidSum,
                 'change_amount' => $change,
@@ -474,6 +503,7 @@ class PosApiController extends Controller
                 'delivery_partner_id' => $data['delivery_partner_id'] ?? null,
                 'delivery_status' => $data['order_type'] === 'delivery' ? 'pending' : null,
                 'payment_on_delivery' => $isCod,
+                'is_comp' => collect($data['items'])->contains(fn ($i) => ! empty($i['is_comp'])),
             ]);
 
             $deliveryAddress = trim((string) ($data['delivery_address'] ?? ''));
@@ -590,6 +620,8 @@ class PosApiController extends Controller
             'items.*.discount_amount' => 'nullable|numeric|min:0',
             'items.*.special_instructions' => 'nullable|string|max:500',
             'items.*.name' => 'nullable|string|max:255',
+            'items.*.is_comp' => 'nullable|boolean',
+            'items.*.comp_reason' => 'nullable|string|max:255',
             'customer_name' => 'nullable|string|max:255',
             'customer_phone' => 'nullable|string|max:30',
         ]);
@@ -646,6 +678,7 @@ class PosApiController extends Controller
                 $tax = $afterDiscount * ($taxRate / 100);
                 $serviceCharge = $afterDiscount * ($serviceRate / 100);
                 $total = $afterDiscount + $tax + $serviceCharge;
+                $rounded = $this->applyPriceRounding($total);
 
                 $order = Order::create([
                     'order_number' => OrderNumberService::generate(Setting::get('invoice_prefix', 'INV-'), 'orders', (bool) Setting::get('invoice_reset_daily', true)),
@@ -661,9 +694,11 @@ class PosApiController extends Controller
                     'tax_amount' => $tax,
                     'service_charge' => $serviceCharge,
                     'discount_amount' => $discount,
-                    'total_amount' => $total,
+                    'rounding_amount' => $rounded['rounding_amount'],
+                    'total_amount' => $rounded['total'],
                     'paid_amount' => 0,
                     'order_notes' => $data['order_notes'] ?? null,
+                    'is_comp' => collect($data['items'])->contains(fn ($i) => ! empty($i['is_comp'])),
                 ]);
             }
 
@@ -678,12 +713,15 @@ class PosApiController extends Controller
                 $afterDiscount = max(0, $subtotal - (float) $order->discount_amount);
                 $tax = $afterDiscount * ($taxRate / 100);
                 $serviceCharge = $afterDiscount * ($serviceRate / 100);
+                $rounded = $this->applyPriceRounding($afterDiscount + $tax + $serviceCharge);
                 $order->update([
                     'subtotal' => $subtotal,
                     'tax_amount' => $tax,
                     'service_charge' => $serviceCharge,
-                    'total_amount' => $afterDiscount + $tax + $serviceCharge,
+                    'rounding_amount' => $rounded['rounding_amount'],
+                    'total_amount' => $rounded['total'],
                     'status' => 'pending',
+                    'is_comp' => $order->items()->where('is_void', false)->where('is_comp', true)->exists(),
                 ]);
             }
 
@@ -879,11 +917,13 @@ class PosApiController extends Controller
                     $service = Setting::get('service_charge_enabled', false)
                         ? round($after * ((float) Setting::get('service_charge_rate', 0) / 100), 2)
                         : 0.0;
+                    $rounded = $this->applyPriceRounding($after + $tax + $service);
                     $order->update([
                         'discount_amount' => $newDiscount,
                         'tax_amount' => $tax,
                         'service_charge' => $service,
-                        'total_amount' => round($after + $tax + $service, 2),
+                        'rounding_amount' => $rounded['rounding_amount'],
+                        'total_amount' => $rounded['total'],
                         'order_notes' => trim(($order->order_notes ? $order->order_notes."\n" : '').'Loyalty: '.LoyaltyService::rewardLabel().' (−'.number_format($redeemValue, 2).')'),
                     ]);
                     $order->refresh();
@@ -893,21 +933,28 @@ class PosApiController extends Controller
 
             $total = (float) $order->total_amount;
             $paymentLines = $this->normalizePaymentLines($data, $total);
-            $paidSum = round(collect($paymentLines)->sum('amount'), 2);
-            if ($paidSum + 0.009 < $total) {
+            $paidBase = round(collect($paymentLines)->sum('amount'), 2);
+            if ($paidBase + 0.009 < $total) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Payments (' . number_format($paidSum, 2) . ') are less than total (' . number_format($total, 2) . ')',
+                    'message' => 'Payments (' . number_format($paidBase, 2) . ') are less than total (' . number_format($total, 2) . ')',
                 ], 422);
             }
 
+            $surcharged = $this->applyCardSurchargeToLines($paymentLines);
+            $paymentLines = $surcharged['lines'];
+            $cardSurchargeAmount = $surcharged['surcharge'];
+            $paidSum = round(collect($paymentLines)->sum('amount'), 2);
+            $payable = round($total + $cardSurchargeAmount, 2);
+
             $register = CashRegister::getActiveForPos(auth()->id());
-            $change = max(0, $paidSum - $total);
+            $change = max(0, $paidSum - $payable);
 
             $updates = [
                 'payment_status' => 'paid',
                 'paid_amount' => $paidSum,
                 'change_amount' => $change,
+                'card_surcharge_amount' => $cardSurchargeAmount,
                 'status' => 'completed',
                 'completed_at' => now(),
                 'cashier_id' => auth()->id(),
@@ -1134,6 +1181,11 @@ class PosApiController extends Controller
 
     public function voidOrder(Request $request)
     {
+        $user = auth()->user();
+        if (! $user || (! $user->can('pos.void') && ! $user->can('orders.void'))) {
+            abort(403, 'Not allowed to void orders');
+        }
+
         $data = $request->validate([
             'order_id' => 'required|integer',
             'reason' => 'required|string|min:3|max:500',
@@ -1153,6 +1205,8 @@ class PosApiController extends Controller
 
         DB::beginTransaction();
         try {
+            $liveItems = $order->items()->where('is_void', false)->get();
+
             $order->update([
                 'is_void' => true,
                 'void_type' => $action,
@@ -1167,6 +1221,10 @@ class PosApiController extends Controller
                 'is_void' => true,
                 'void_reason' => $action === 'cancel' ? 'Bill cancelled' : 'Bill voided',
             ]);
+
+            if ($liveItems->isNotEmpty()) {
+                app(KitchenTicketService::class)->restoreStock($order, $liveItems);
+            }
 
             app(KitchenTicketService::class)->cancelActiveTickets($order);
             RestaurantTable::syncOccupancy($order->table_id);
@@ -1185,6 +1243,247 @@ class PosApiController extends Controller
             'order_id' => $order->id,
             'order_number' => $order->order_number,
             'action' => $action,
+        ]);
+    }
+
+    /**
+     * Mark an open-bill line (or whole unpaid order) as comp — price 0, not a discount.
+     */
+    public function markComp(Request $request)
+    {
+        $user = auth()->user();
+        if (! $user || (! $user->can('pos.comp') && ! $user->can('orders.comp'))) {
+            abort(403, 'Not allowed to comp');
+        }
+
+        $data = $request->validate([
+            'order_id' => 'required|integer|exists:orders,id',
+            'order_item_id' => 'nullable|integer|exists:order_items,id',
+            'reason' => 'nullable|string|max:255',
+        ]);
+
+        $order = Order::findOrFail($data['order_id']);
+        if ($order->is_void || $order->status === 'cancelled') {
+            return response()->json(['success' => false, 'message' => 'Cannot comp a voided order'], 422);
+        }
+        if ($order->payment_status === 'paid') {
+            return response()->json(['success' => false, 'message' => 'Cannot comp a paid bill — use refund'], 422);
+        }
+
+        $reason = trim((string) ($data['reason'] ?? '')) ?: 'Comp';
+
+        DB::beginTransaction();
+        try {
+            if (! empty($data['order_item_id'])) {
+                $item = OrderItem::where('order_id', $order->id)->where('id', $data['order_item_id'])->firstOrFail();
+                if ($item->is_void) {
+                    return response()->json(['success' => false, 'message' => 'Item is voided'], 422);
+                }
+                $item->update([
+                    'is_comp' => true,
+                    'comp_reason' => $reason,
+                    'discount_amount' => 0,
+                    'total_price' => 0,
+                ]);
+                $item->addons()->update(['price' => 0]);
+            } else {
+                $order->items()->where('is_void', false)->each(function (OrderItem $item) use ($reason) {
+                    $item->update([
+                        'is_comp' => true,
+                        'comp_reason' => $reason,
+                        'discount_amount' => 0,
+                        'total_price' => 0,
+                    ]);
+                    $item->addons()->update(['price' => 0]);
+                });
+            }
+
+            $subtotal = (float) $order->items()->where('is_void', false)->sum('total_price');
+            $afterDiscount = max(0, $subtotal - (float) $order->discount_amount);
+            $taxRate = (bool) Setting::get('tax_enabled', false) ? (float) Setting::get('tax_rate', 0) : 0;
+            $tax = $afterDiscount * ($taxRate / 100);
+            $serviceRate = Setting::get('service_charge_enabled', false) ? (float) Setting::get('service_charge_rate', 0) : 0;
+            $service = $afterDiscount * ($serviceRate / 100);
+            $rounded = $this->applyPriceRounding($afterDiscount + $tax + $service);
+
+            $order->update([
+                'subtotal' => $subtotal,
+                'tax_amount' => $tax,
+                'service_charge' => $service,
+                'rounding_amount' => $rounded['rounding_amount'],
+                'total_amount' => $rounded['total'],
+                'is_comp' => true,
+                'comp_reason' => $reason,
+                'comped_by' => auth()->id(),
+                'comped_at' => now(),
+            ]);
+
+            DB::commit();
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('POS markComp failed: '.$e->getMessage());
+
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+        }
+
+        $order->refresh();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Comp applied',
+            'order_id' => $order->id,
+            'total_amount' => (float) $order->total_amount,
+            'is_comp' => true,
+        ]);
+    }
+
+    /**
+     * Refund a paid order (full or partial by amount). Method: cash or card.
+     */
+    public function refundOrder(Request $request)
+    {
+        $user = auth()->user();
+        if (! $user || (! $user->can('pos.refund') && ! $user->can('orders.refund'))) {
+            abort(403, 'Not allowed to refund');
+        }
+
+        $data = $request->validate([
+            'order_id' => 'required|integer|exists:orders,id',
+            'amount' => 'nullable|numeric|min:0.01',
+            'method' => 'required|in:cash,card',
+            'reason' => 'nullable|string|max:500',
+            'item_ids' => 'nullable|array',
+            'item_ids.*' => 'integer',
+            'full' => 'nullable|boolean',
+        ]);
+
+        $order = Order::with(['payments', 'items'])->findOrFail($data['order_id']);
+
+        if ($order->is_void || $order->status === 'cancelled') {
+            return response()->json(['success' => false, 'message' => 'Cannot refund a voided/cancelled order'], 422);
+        }
+        if ($order->payment_status !== 'paid' && $order->status !== 'refunded') {
+            // Allow partial follow-up refunds on already partially refunded (status may still be completed)
+            if ((float) $order->paid_amount <= 0) {
+                return response()->json(['success' => false, 'message' => 'Order is not paid'], 422);
+            }
+        }
+
+        $completedPayments = $order->payments->where('status', 'completed');
+        $grossPaid = round((float) $completedPayments->filter(fn ($p) => (float) $p->amount > 0)->sum('amount'), 2);
+        $alreadyRefunded = round(abs((float) $completedPayments->filter(fn ($p) => (float) $p->amount < 0)->sum('amount')), 2);
+        $refundable = round(max(0, $grossPaid - $alreadyRefunded), 2);
+
+        if ($refundable <= 0.009) {
+            return response()->json(['success' => false, 'message' => 'Nothing left to refund'], 422);
+        }
+
+        $method = $data['method'];
+        $hadCard = $completedPayments->contains(fn ($p) => $p->method === 'card' && (float) $p->amount > 0);
+        if ($method === 'card' && ! $hadCard) {
+            return response()->json(['success' => false, 'message' => 'Original order had no card payment'], 422);
+        }
+
+        $cardPaid = round((float) $completedPayments->filter(fn ($p) => $p->method === 'card' && (float) $p->amount > 0)->sum('amount'), 2);
+        $cardRefunded = round(abs((float) $completedPayments->filter(fn ($p) => $p->method === 'card' && (float) $p->amount < 0)->sum('amount')), 2);
+        $cardRefundable = round(max(0, $cardPaid - $cardRefunded), 2);
+        $cashPaid = round((float) $completedPayments->filter(fn ($p) => $p->method === 'cash' && (float) $p->amount > 0)->sum('amount'), 2);
+        $cashRefunded = round(abs((float) $completedPayments->filter(fn ($p) => $p->method === 'cash' && (float) $p->amount < 0)->sum('amount')), 2);
+        $cashRefundable = round(max(0, $cashPaid - $cashRefunded), 2);
+
+        $methodCap = $method === 'card' ? $cardRefundable : $cashRefundable;
+        // Cash refunds can also refund non-cash remainder as cash if cashier chooses cash
+        if ($method === 'cash') {
+            $methodCap = $refundable;
+        } else {
+            $methodCap = min($refundable, $cardRefundable);
+        }
+
+        $isFull = $request->boolean('full') || empty($data['amount']);
+        $refundAmount = $isFull ? $methodCap : round((float) $data['amount'], 2);
+        if ($refundAmount > $methodCap + 0.009) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Refund amount exceeds refundable ('.$methodCap.')',
+            ], 422);
+        }
+
+        // Proportional card surcharge is already inside card payment amounts; no extra add-on needed.
+        $reason = trim((string) ($data['reason'] ?? '')) ?: 'refund';
+
+        DB::beginTransaction();
+        try {
+            $register = CashRegister::getActiveForPos(auth()->id());
+            if (! $register && $order->register_id) {
+                $register = CashRegister::find($order->register_id);
+            }
+
+            $payment = Payment::create([
+                'order_id' => $order->id,
+                'method' => $method,
+                'amount' => -abs($refundAmount),
+                'surcharge_amount' => null,
+                'status' => 'completed',
+                'notes' => $reason,
+                'created_by' => auth()->id(),
+            ]);
+
+            if ($register) {
+                if ($method === 'cash') {
+                    if (\Illuminate\Support\Facades\Schema::hasColumn('cash_registers', 'cash_refunds')) {
+                        $register->increment('cash_refunds', $refundAmount);
+                    } else {
+                        $register->increment('cash_out', $refundAmount);
+                    }
+                } else {
+                    $register->decrement('card_sales', min((float) $register->card_sales, $refundAmount));
+                }
+            }
+
+            app(AccountService::class)->postRefund($payment->loadMissing('order'), $refundAmount);
+
+            $newPaid = round(max(0, (float) $order->paid_amount - $refundAmount), 2);
+            $fullyRefunded = $newPaid <= 0.009 || ($alreadyRefunded + $refundAmount) + 0.009 >= $grossPaid;
+
+            $orderUpdates = [
+                'paid_amount' => $newPaid,
+            ];
+            if ($fullyRefunded) {
+                $orderUpdates['status'] = 'refunded';
+                $orderUpdates['payment_status'] = 'paid';
+            }
+            $order->update($orderUpdates);
+
+            $itemIds = $data['item_ids'] ?? [];
+            if ($fullyRefunded && empty($itemIds)) {
+                $restore = $order->items()->where('is_void', false)->get();
+                if ($restore->isNotEmpty()) {
+                    app(KitchenTicketService::class)->restoreStock($order, $restore);
+                }
+            } elseif (! empty($itemIds)) {
+                $restore = $order->items()->where('is_void', false)->whereIn('id', $itemIds)->get();
+                if ($restore->isNotEmpty()) {
+                    app(KitchenTicketService::class)->restoreStock($order, $restore);
+                }
+            }
+
+            DB::commit();
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('POS refund failed: '.$e->getMessage(), ['trace' => $e->getTraceAsString()]);
+
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Refund recorded',
+            'order_id' => $order->id,
+            'order_number' => $order->order_number,
+            'refund_amount' => $refundAmount,
+            'method' => $method,
+            'paid_amount' => (float) $order->fresh()->paid_amount,
+            'status' => $order->fresh()->status,
         ]);
     }
 
@@ -1210,7 +1509,7 @@ class PosApiController extends Controller
     public function printKot(Request $request, Order $order)
     {
         $order->loadMissing(['waiter', 'table']);
-        $query = KitchenOrder::with('items')
+        $query = KitchenOrder::with(['items.orderItem.addons'])
             ->where('order_id', $order->id)
             ->where('type', 'kitchen');
 
@@ -1234,7 +1533,7 @@ class PosApiController extends Controller
     public function printBot(Request $request, Order $order)
     {
         $order->loadMissing(['waiter', 'table']);
-        $query = KitchenOrder::with('items')
+        $query = KitchenOrder::with(['items.orderItem.addons'])
             ->where('order_id', $order->id)
             ->where('type', 'bar');
 
@@ -1910,6 +2209,7 @@ class PosApiController extends Controller
                     'status' => $order->status,
                     'payment_status' => $order->payment_status,
                     'is_void' => (bool) $order->is_void,
+                    'is_comp' => (bool) $order->is_comp,
                     'customer' => $order->customer?->name ?? 'Walk-in',
                     'table' => $order->table?->name,
                     'waiter' => $order->waiter?->name,
@@ -1977,6 +2277,69 @@ class PosApiController extends Controller
         return [['method' => $method, 'amount' => round($amount, 2)]];
     }
 
+    /**
+     * Round bill total up to the configured unit. Returns ['total' => float, 'rounding_amount' => float].
+     */
+    protected function applyPriceRounding(float $total): array
+    {
+        $enabled = (bool) Setting::get('price_rounding_enabled', true);
+        $unit = (float) Setting::get('price_rounding_unit', 1);
+        $mode = (string) Setting::get('price_rounding_mode', 'up');
+        $total = round(max(0, $total), 2);
+
+        if (! $enabled || $unit <= 0) {
+            return ['total' => $total, 'rounding_amount' => 0.0];
+        }
+
+        if ($mode === 'up' || $mode === '') {
+            $rounded = ceil(($total / $unit) - 1e-9) * $unit;
+        } else {
+            $rounded = round($total / $unit) * $unit;
+        }
+        $rounded = round($rounded, 2);
+        $rounding = round(max(0, $rounded - $total), 2);
+
+        return ['total' => $rounded, 'rounding_amount' => $rounding];
+    }
+
+    protected function cardSurchargePercent(): float
+    {
+        if (! (bool) Setting::get('card_surcharge_enabled', true)) {
+            return 0.0;
+        }
+
+        return max(0.0, (float) Setting::get('card_surcharge_percent', 3));
+    }
+
+    /**
+     * Add card surcharge onto card payment lines (base amounts in, charged amounts out).
+     *
+     * @param  array<int, array{method:string,amount:float}>  $paymentLines
+     * @return array{lines: array<int, array{method:string,amount:float,surcharge_amount:float}>, surcharge: float}
+     */
+    protected function applyCardSurchargeToLines(array $paymentLines): array
+    {
+        $percent = $this->cardSurchargePercent();
+        $totalSurcharge = 0.0;
+        $out = [];
+
+        foreach ($paymentLines as $p) {
+            $base = round((float) $p['amount'], 2);
+            $surcharge = 0.0;
+            if ($percent > 0 && ($p['method'] ?? '') === 'card') {
+                $surcharge = round($base * ($percent / 100), 2);
+                $totalSurcharge = round($totalSurcharge + $surcharge, 2);
+            }
+            $out[] = [
+                'method' => $p['method'],
+                'amount' => round($base + $surcharge, 2),
+                'surcharge_amount' => $surcharge,
+            ];
+        }
+
+        return ['lines' => $out, 'surcharge' => $totalSurcharge];
+    }
+
     protected function recordPaymentLines(Order $order, array $payments, ?CashRegister $register, ?string $notes = null): void
     {
         $accountService = app(AccountService::class);
@@ -1985,13 +2348,16 @@ class PosApiController extends Controller
         foreach ($payments as $p) {
             $method = $p['method'];
             $amount = (float) $p['amount'];
+            $surcharge = (float) ($p['surcharge_amount'] ?? 0);
 
             $payment = Payment::create([
                 'order_id' => $order->id,
                 'method' => $method,
                 'amount' => $amount,
+                'surcharge_amount' => $surcharge > 0 ? $surcharge : null,
                 'reference_number' => $notes,
                 'status' => 'completed',
+                'notes' => $surcharge > 0 ? 'Includes card surcharge '.$surcharge : null,
                 'created_by' => auth()->id(),
             ]);
 
@@ -2152,7 +2518,16 @@ class PosApiController extends Controller
     private function createOrderItemFromPosPayload(Order $order, array $item, bool $withLoyalty): OrderItem
     {
         $isCustom = ! empty($item['is_custom_item']);
-        $lineDiscount = $this->posLineDiscount($item);
+        $isComp = ! empty($item['is_comp']);
+        $compReason = $isComp ? (trim((string) ($item['comp_reason'] ?? '')) ?: 'Comp') : null;
+        $lineDiscount = $isComp ? 0 : $this->posLineDiscount($item);
+
+        if ($isComp) {
+            $user = auth()->user();
+            if (! $user || (! $user->can('pos.comp') && ! $user->can('orders.comp'))) {
+                abort(403, 'Not allowed to comp items');
+            }
+        }
 
         if ($isCustom) {
             $displayName = trim((string) ($item['name'] ?? 'Custom Item'));
@@ -2167,9 +2542,11 @@ class PosApiController extends Controller
                 'quantity'             => $item['quantity'],
                 'unit_price'           => $unitPrice,
                 'discount_amount'      => $lineDiscount,
-                'total_price'          => max(0, $gross - $lineDiscount),
+                'total_price'          => $isComp ? 0 : max(0, $gross - $lineDiscount),
                 'special_instructions' => $item['special_instructions'] ?? null,
                 'routed_to'            => 'kitchen', // custom items follow KOT by default
+                'is_comp'              => $isComp,
+                'comp_reason'          => $compReason,
             ]);
             return $orderItem;
         }
@@ -2184,16 +2561,31 @@ class PosApiController extends Controller
         if ($isLoyaltyFree && ! str_contains(strtoupper($displayName), 'FREE')) {
             $displayName .= ' · '.LoyaltyService::rewardLabel();
         }
-        $unitPrice   = $isLoyaltyFree ? 0 : (float) $item['price'];
-        $addonSum    = $isLoyaltyFree ? 0 : collect($item['addons'] ?? [])->sum('price');
+        if ($isComp && ! str_contains(strtoupper($displayName), 'COMP')) {
+            $displayName .= ' · COMP';
+        }
+        $unitPrice   = ($isLoyaltyFree || $isComp) ? (float) $item['price'] : (float) $item['price'];
+        if ($isLoyaltyFree) {
+            $unitPrice = 0;
+        }
+        $addonSum    = ($isLoyaltyFree || $isComp) ? 0 : collect($item['addons'] ?? [])->sum('price');
+        if ($isComp) {
+            $addonSum = collect($item['addons'] ?? [])->sum('price'); // keep addons on unit display via create below at 0
+        }
         $instructions = $item['special_instructions'] ?? null;
         if ($isLoyaltyFree) {
             $tag = 'LOYALTY FREE · '.LoyaltyService::rewardLabel();
             $instructions = trim(($instructions ? $instructions.' · ' : '').$tag);
         }
+        if ($isComp) {
+            $instructions = trim(($instructions ? $instructions.' · ' : '').'COMP'.($compReason ? ': '.$compReason : ''));
+        }
 
-        $gross = ($unitPrice + $addonSum) * (float) $item['quantity'];
-        $discount = $isLoyaltyFree ? 0 : $lineDiscount;
+        $gross = ($isLoyaltyFree ? 0 : ((float) $item['price'] + collect($item['addons'] ?? [])->sum('price'))) * (float) $item['quantity'];
+        if ($isLoyaltyFree) {
+            $gross = 0;
+        }
+        $discount = ($isLoyaltyFree || $isComp) ? 0 : $lineDiscount;
 
         $orderItem = OrderItem::create([
             'order_id'             => $order->id,
@@ -2202,23 +2594,31 @@ class PosApiController extends Controller
             'is_custom_item'       => false,
             'product_name'         => $displayName,
             'quantity'             => $item['quantity'],
-            'unit_price'           => $unitPrice,
+            'unit_price'           => $isLoyaltyFree ? 0 : (float) $item['price'],
             'discount_amount'      => $discount,
-            'total_price'          => max(0, $gross - $discount),
+            'total_price'          => $isComp ? 0 : max(0, $gross - $discount),
             'special_instructions' => $instructions,
             'routed_to'            => match ($product?->category?->type ?? 'kot') {
                 'bot'    => 'bar',
                 'direct' => 'direct',
                 default  => 'kitchen',
             },
+            'is_comp'              => $isComp,
+            'comp_reason'          => $compReason,
         ]);
 
         foreach ($item['addons'] ?? [] as $addon) {
+            $addonId = isset($addon['id']) ? (int) $addon['id'] : null;
+            $useShared = array_key_exists('shared', $addon)
+                ? (bool) $addon['shared']
+                : ($addonId > 0 && \App\Models\Addon::whereKey($addonId)->exists());
+
             OrderItemAddon::create([
-                'order_item_id'   => $orderItem->id,
-                'product_addon_id' => $addon['id'] ?? null,
-                'addon_name'       => $addon['name'] ?? $addon['addon_name'] ?? 'Addon',
-                'price'            => $isLoyaltyFree ? 0 : (float) ($addon['price'] ?? 0),
+                'order_item_id' => $orderItem->id,
+                'product_addon_id' => $useShared ? null : $addonId,
+                'addon_id' => $useShared ? $addonId : null,
+                'addon_name' => $addon['name'] ?? $addon['addon_name'] ?? 'Addon',
+                'price' => ($isLoyaltyFree || $isComp) ? 0 : (float) ($addon['price'] ?? 0),
             ]);
         }
 
@@ -2236,6 +2636,9 @@ class PosApiController extends Controller
     /** Item-level discount amount (capped at line gross). */
     protected function posLineDiscount(array $item): float
     {
+        if (! empty($item['is_comp'])) {
+            return 0.0;
+        }
         $raw = (float) ($item['discount'] ?? $item['discount_amount'] ?? 0);
 
         return min($this->posLineGross($item), max(0, $raw));
@@ -2244,6 +2647,10 @@ class PosApiController extends Controller
     /** Net line total after item discount. */
     protected function posLineNet(array $item): float
     {
+        if (! empty($item['is_comp'])) {
+            return 0.0;
+        }
+
         return max(0, $this->posLineGross($item) - $this->posLineDiscount($item));
     }
 
@@ -2259,6 +2666,8 @@ class PosApiController extends Controller
                 'status' => $order->status,
                 'payment_status' => $order->payment_status,
                 'is_void' => (bool) $order->is_void,
+                'is_comp' => (bool) $order->is_comp,
+                'comp_reason' => $order->comp_reason,
                 'customer_id' => $order->customer_id,
                 'customer_name' => $order->customer?->name,
                 'customer_phone' => $order->customer?->phone,
@@ -2272,6 +2681,8 @@ class PosApiController extends Controller
                 'tax_amount' => (float) $order->tax_amount,
                 'service_charge' => (float) $order->service_charge,
                 'discount_amount' => (float) $order->discount_amount,
+                'rounding_amount' => (float) ($order->rounding_amount ?? 0),
+                'card_surcharge_amount' => (float) ($order->card_surcharge_amount ?? 0),
                 'total_amount' => (float) $order->total_amount,
                 'order_notes' => $order->order_notes,
                 'items' => $order->items->where('is_void', false)->values()->map(function ($item) {
@@ -2287,6 +2698,8 @@ class PosApiController extends Controller
                         'discount_amount' => (float) ($item->discount_amount ?? 0),
                         'discount' => (float) ($item->discount_amount ?? 0),
                         'total_price' => (float) $item->total_price,
+                        'is_comp' => (bool) $item->is_comp,
+                        'comp_reason' => $item->comp_reason,
                         'routed_to' => $item->routed_to,
                         'special_instructions' => $item->special_instructions,
                         'addons' => $item->addons->map(function ($addon) {
@@ -2349,6 +2762,8 @@ class PosApiController extends Controller
             'customer_phone' => 'nullable|string|max:30',
             'items.*.discount' => 'nullable|numeric|min:0',
             'items.*.discount_amount' => 'nullable|numeric|min:0',
+            'items.*.is_comp' => 'nullable|boolean',
+            'items.*.comp_reason' => 'nullable|string|max:255',
         ]);
 
         $items = $data['items'] ?? [];
@@ -2459,6 +2874,8 @@ class PosApiController extends Controller
             );
             $serviceCharge = $afterDiscount * ($serviceChargeRate / 100);
             $total = $afterDiscount + $tax + $serviceCharge;
+            $rounded = $this->applyPriceRounding($total);
+            $total = $rounded['total'];
 
             // A changed total on a settled bill reopens it so the difference can be collected
             $reopened = $wasPaid && $itemsChanged;
@@ -2468,7 +2885,9 @@ class PosApiController extends Controller
                 'discount_amount' => $discount,
                 'tax_amount' => $tax,
                 'service_charge' => $serviceCharge,
+                'rounding_amount' => $rounded['rounding_amount'],
                 'total_amount' => $total,
+                'is_comp' => $order->items()->where('is_void', false)->where('is_comp', true)->exists(),
                 // Reopened bills must leave a closed status, or they drop out of Open Bills
                 'status' => ($ticketItems->isNotEmpty() || $reopened) ? 'pending' : $order->status,
                 'order_notes' => array_key_exists('order_notes', $data) ? $data['order_notes'] : $order->order_notes,
@@ -2569,24 +2988,37 @@ class PosApiController extends Controller
                 ? ($keep['special_instructions'] ?: null)
                 : $item->special_instructions;
             $addonSum = (float) $item->addons->sum('price');
-            $lineDiscount = $this->posLineDiscount(array_merge($keep, [
+            $isComp = array_key_exists('is_comp', $keep) ? ! empty($keep['is_comp']) : (bool) $item->is_comp;
+            $compReason = $isComp
+                ? (trim((string) ($keep['comp_reason'] ?? $item->comp_reason ?? '')) ?: 'Comp')
+                : null;
+            if ($isComp && ! $item->is_comp) {
+                $user = auth()->user();
+                if (! $user || (! $user->can('pos.comp') && ! $user->can('orders.comp'))) {
+                    abort(403, 'Not allowed to comp items');
+                }
+            }
+            $lineDiscount = $isComp ? 0 : $this->posLineDiscount(array_merge($keep, [
                 'price' => (float) $item->unit_price,
                 'addons' => $item->addons->map(fn ($a) => ['price' => (float) $a->price])->all(),
                 'quantity' => $newQty,
             ]));
-            $newTotal = max(0, (((float) $item->unit_price + $addonSum) * $newQty) - $lineDiscount);
+            $newTotal = $isComp ? 0 : max(0, (((float) $item->unit_price + $addonSum) * $newQty) - $lineDiscount);
 
             if (
                 abs($newQty - $oldQty) > 0.0001
                 || $newNote !== $item->special_instructions
                 || abs($lineDiscount - (float) $item->discount_amount) > 0.009
                 || abs($newTotal - (float) $item->total_price) > 0.009
+                || (bool) $item->is_comp !== $isComp
             ) {
                 $item->update([
                     'quantity' => $newQty,
                     'discount_amount' => $lineDiscount,
                     'total_price' => $newTotal,
                     'special_instructions' => $newNote,
+                    'is_comp' => $isComp,
+                    'comp_reason' => $compReason,
                 ]);
             }
 

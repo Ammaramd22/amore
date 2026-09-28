@@ -12,7 +12,7 @@ class OrderItemAddon extends Model
     protected $table = 'order_item_addons';
 
     protected $fillable = [
-        'order_item_id', 'product_addon_id', 'addon_name', 'price',
+        'order_item_id', 'product_addon_id', 'addon_id', 'addon_name', 'price',
     ];
 
     protected $casts = [
@@ -27,5 +27,10 @@ class OrderItemAddon extends Model
     public function addon()
     {
         return $this->belongsTo(ProductAddon::class, 'product_addon_id');
+    }
+
+    public function sharedAddon()
+    {
+        return $this->belongsTo(Addon::class, 'addon_id');
     }
 }

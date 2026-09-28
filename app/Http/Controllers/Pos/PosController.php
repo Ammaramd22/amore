@@ -53,12 +53,22 @@ class PosController extends Controller
             'customer_display_mode' => 'digital',
             'customer_display_protocol' => 'plain',
             'customer_display_baud' => 9600,
+            'price_rounding_enabled' => true,
+            'price_rounding_mode' => 'up',
+            'price_rounding_unit' => 1,
+            'card_surcharge_enabled' => true,
+            'card_surcharge_percent' => 3,
         ]);
 
         $settings['tax_enabled'] = (bool) $settings['tax_enabled'];
         $settings['tax_rate'] = (float) $settings['tax_rate'];
         $settings['service_charge_rate'] = (float) $settings['service_charge_rate'];
         $settings['service_charge_enabled'] = (bool) $settings['service_charge_enabled'];
+        $settings['price_rounding_enabled'] = (bool) $settings['price_rounding_enabled'];
+        $settings['price_rounding_mode'] = (string) ($settings['price_rounding_mode'] ?: 'up');
+        $settings['price_rounding_unit'] = (float) ($settings['price_rounding_unit'] ?: 1);
+        $settings['card_surcharge_enabled'] = (bool) $settings['card_surcharge_enabled'];
+        $settings['card_surcharge_percent'] = (float) ($settings['card_surcharge_percent'] ?? 3);
         $settings['table_selection_required'] = (bool) $settings['table_selection_required'];
         $settings['show_screen_numbers_keyboard'] = (bool) $settings['show_screen_numbers_keyboard'];
         $settings['print_ask_before'] = (bool) $settings['print_ask_before'];
@@ -141,7 +151,7 @@ class PosController extends Controller
                     ->orderBy('display_order')
                     ->orderBy('name')
                     ->select([
-                        'id', 'category_id', 'name', 'code', 'barcode', 'image',
+                        'id', 'category_id', 'subcategory_id', 'name', 'code', 'barcode', 'image',
                         'selling_price', 'discount_amount', 'discount_type',
                         'has_variants', 'has_addons', 'display_order',
                         'is_available', 'show_in_pos',
@@ -156,6 +166,7 @@ class PosController extends Controller
                         'partnerPrices:id,product_id,delivery_partner_id,price',
                     ]);
             }])
+            ->with(['subcategories' => fn ($q) => $q->active()->orderBy('display_order')->orderBy('name')])
             ->get(['id', 'name', 'display_order', 'is_active', 'show_in_pos', 'type', 'color', 'image']);
 
         $floorsQuery = Floor::active()->with(['tables' => function ($q) {
@@ -214,7 +225,28 @@ class PosController extends Controller
             ->latest('id')
             ->first(['order_number', 'total_amount', 'paid_amount', 'change_amount']);
 
-        return view('pos.index', compact('categories', 'tables', 'floors', 'customers', 'heldOrders', 'waiters', 'settings', 'lastSale'));
+        $subcategoryMap = $categories->mapWithKeys(function ($c) {
+            return [
+                (string) $c->id => $c->subcategories->map(function ($s) {
+                    return [
+                        'id' => $s->id,
+                        'name' => $s->name,
+                    ];
+                })->values()->all(),
+            ];
+        })->all();
+
+        return view('pos.index', compact(
+            'categories',
+            'tables',
+            'floors',
+            'customers',
+            'heldOrders',
+            'waiters',
+            'settings',
+            'lastSale',
+            'subcategoryMap'
+        ));
     }
 
     public function dineIn()

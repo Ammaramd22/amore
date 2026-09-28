@@ -15,11 +15,13 @@ class Order extends Model
         'waiter_id', 'cashier_id', 'delivery_staff_id',
         'order_type', 'source', 'status', 'approval_status', 'payment_status',
         'subtotal', 'tax_amount', 'service_charge', 'discount_amount',
-        'delivery_charge', 'tip_amount', 'total_amount', 'paid_amount', 'change_amount',
+        'delivery_charge', 'tip_amount', 'rounding_amount', 'card_surcharge_amount',
+        'total_amount', 'paid_amount', 'change_amount',
         'order_notes', 'pickup_time', 'delivery_address', 'google_maps_link',
         'delivery_partner_id', 'payment_on_delivery', 'delivery_status', 'completed_at', 'bill_requested_at',
         'delivery_partner_fee', 'partner_due_amount', 'partner_settlement_status', 'partner_settled_amount',
         'merged_from_order_id', 'is_void', 'void_type', 'void_reason', 'voided_by',
+        'is_comp', 'comp_reason', 'comped_by', 'comped_at',
         'register_id',
     ];
 
@@ -33,13 +35,17 @@ class Order extends Model
         'partner_due_amount' => 'decimal:2',
         'partner_settled_amount' => 'decimal:2',
         'tip_amount' => 'decimal:2',
+        'rounding_amount' => 'decimal:2',
+        'card_surcharge_amount' => 'decimal:2',
         'total_amount' => 'decimal:2',
         'paid_amount' => 'decimal:2',
         'change_amount' => 'decimal:2',
         'payment_on_delivery' => 'boolean',
         'is_void' => 'boolean',
+        'is_comp' => 'boolean',
         'completed_at' => 'datetime',
         'bill_requested_at' => 'datetime',
+        'comped_at' => 'datetime',
     ];
 
     public function branch()
@@ -75,6 +81,11 @@ class Order extends Model
     public function voidedBy()
     {
         return $this->belongsTo(User::class, 'voided_by');
+    }
+
+    public function compedBy()
+    {
+        return $this->belongsTo(User::class, 'comped_by');
     }
 
     public function deliveryStaff()

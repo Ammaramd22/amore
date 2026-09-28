@@ -59,6 +59,15 @@
                             <div id="categoryTypeHint" class="form-text">Category type sets KOT, BOT, or direct stock.</div>
                         </div>
                         <div class="col-md-6">
+                            <label for="subcategory_id" class="form-label">Subcategory <span class="text-muted fw-normal">(optional)</span></label>
+                            <select id="subcategory_id" name="subcategory_id" class="form-select">
+                                <option value="">None</option>
+                                @foreach($subcategories ?? [] as $sub)
+                                <option value="{{ $sub->id }}" @selected(old('subcategory_id', $product->subcategory_id) == $sub->id)>{{ $sub->name }}</option>
+                                @endforeach
+                            </select>
+                        </div>
+                        <div class="col-md-6">
                             <label for="barcode" class="form-label">Barcode <span class="text-muted fw-normal">(optional)</span></label>
                             <input type="text" id="barcode" name="barcode" class="form-control" value="{{ old('barcode', $product->barcode) }}">
                         </div>
@@ -168,7 +177,26 @@
                         <div class="col-md-6">
                             <div class="pf-list-card">
                                 <div class="pf-list-head">
-                                    <strong>Add-ons</strong>
+                                    <strong>Shared add-ons</strong>
+                                    <a href="{{ route('addons.create') }}" class="btn btn-sm btn-outline-secondary" target="_blank"><i class="fas fa-external-link-alt me-1"></i>Manage</a>
+                                </div>
+                                <div class="pf-list-body" style="max-height:220px;overflow:auto;">
+                                    @php $selectedShared = old('shared_addon_ids', $selectedSharedAddonIds ?? []); @endphp
+                                    @forelse(($catalogAddons ?? collect()) as $ca)
+                                    <div class="form-check mb-1">
+                                        <input class="form-check-input" type="checkbox" name="shared_addon_ids[]" value="{{ $ca->id }}" id="shared_addon_{{ $ca->id }}"
+                                            {{ in_array($ca->id, $selectedShared) ? 'checked' : '' }}>
+                                        <label class="form-check-label" for="shared_addon_{{ $ca->id }}">
+                                            {{ $ca->name }} <span class="text-muted">({{ number_format((float) $ca->price, 2) }})</span>
+                                        </label>
+                                    </div>
+                                    @empty
+                                    <div class="text-muted small">No shared add-ons yet. Create them under Menu Management → Add-ons.</div>
+                                    @endforelse
+                                </div>
+                                <div class="form-text px-2 pb-2">Or add a one-off below (also saved to the shared catalog).</div>
+                                <div class="pf-list-head border-top">
+                                    <strong>Quick add</strong>
                                     <button type="button" class="btn btn-sm btn-outline-primary" onclick="addAddonRow()"><i class="fas fa-plus me-1"></i>Add</button>
                                 </div>
                                 <div id="addonRows" class="pf-list-body">
@@ -471,5 +499,44 @@ function previewProductImage(input) {
     box.classList.add('has-image');
     box.innerHTML = '<img src="' + url + '" alt="Preview">';
 }
+
+(function () {
+    const categorySelect = document.getElementById('category_id');
+    const subcategorySelect = document.getElementById('subcategory_id');
+    const selectedSubId = @json(old('subcategory_id', $product->subcategory_id));
+    const urlTemplate = @json(url('/products/subcategories-by-category/__ID__'));
+
+    async function loadSubcategories(categoryId, preferId = null) {
+        if (!subcategorySelect) return;
+        subcategorySelect.innerHTML = '<option value="">Loading…</option>';
+        if (!categoryId) {
+            subcategorySelect.innerHTML = '<option value="">Select category first</option>';
+            return;
+        }
+        try {
+            const res = await fetch(urlTemplate.replace('__ID__', categoryId), {
+                headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+            });
+            const items = await res.json();
+            let html = '<option value="">None</option>';
+            (items || []).forEach(s => {
+                const sel = preferId && String(preferId) === String(s.id) ? ' selected' : '';
+                html += `<option value="${s.id}"${sel}>${s.name}</option>`;
+            });
+            subcategorySelect.innerHTML = html;
+        } catch (e) {
+            subcategorySelect.innerHTML = '<option value="">Unable to load</option>';
+        }
+    }
+
+    if (categorySelect) {
+        $(categorySelect).on('change', function () {
+            loadSubcategories(this.value);
+        });
+        if (categorySelect.value) {
+            loadSubcategories(categorySelect.value, selectedSubId);
+        }
+    }
+})();
 </script>
 @endpush

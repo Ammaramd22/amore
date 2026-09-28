@@ -27,6 +27,7 @@ class CashRegister extends Model
         'credit_sales',
         'cash_in',
         'cash_out',
+        'cash_refunds',
         'orders_count',
         'notes',
         'opened_at',
@@ -43,6 +44,7 @@ class CashRegister extends Model
         'credit_sales' => 'decimal:2',
         'cash_in' => 'decimal:2',
         'cash_out' => 'decimal:2',
+        'cash_refunds' => 'decimal:2',
         'business_date' => 'date',
         'opened_at' => 'datetime',
         'closed_at' => 'datetime',
@@ -70,7 +72,9 @@ class CashRegister extends Model
 
     public function getExpectedCashAttribute()
     {
-        return $this->opening_balance + $this->cash_sales + $this->cash_in - $this->cash_out;
+        $refunds = (float) ($this->cash_refunds ?? 0);
+
+        return $this->opening_balance + $this->cash_sales + $this->cash_in - $this->cash_out - $refunds;
     }
 
     public function getTotalSalesAttribute()
@@ -227,6 +231,7 @@ class CashRegister extends Model
             'credit_sales' => $shifts->sum('credit_sales'),
             'cash_in' => $shifts->sum('cash_in'),
             'cash_out' => $shifts->sum('cash_out'),
+            'cash_refunds' => $shifts->sum(fn ($s) => (float) ($s->cash_refunds ?? 0)),
             'orders_count' => $shifts->sum('orders_count'),
             'notes' => trim(($notes ?? '')."\nAggregated from ".$shifts->count().' shift(s)'),
             'opened_at' => $shifts->min('opened_at'),

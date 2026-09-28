@@ -14,6 +14,7 @@ class OrderItem extends Model
         'is_custom_item', 'product_name', 'quantity', 'unit_price', 'tax_amount',
         'discount_amount', 'total_price', 'special_instructions',
         'status', 'routed_to', 'is_void', 'void_reason',
+        'is_comp', 'comp_reason',
     ];
 
     protected $casts = [
@@ -24,6 +25,7 @@ class OrderItem extends Model
         'total_price' => 'decimal:2',
         'is_void' => 'boolean',
         'is_custom_item' => 'boolean',
+        'is_comp' => 'boolean',
     ];
 
     public function order()

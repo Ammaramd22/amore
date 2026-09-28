@@ -48,6 +48,42 @@ class AccountService
         );
     }
 
+    /** Ledger outflow for a refund payment (negative or refunded status). */
+    public function postRefund(Payment $payment, ?float $ledgerAmount = null): ?AccountTransaction
+    {
+        if (! in_array($payment->status, ['completed', 'refunded'], true)) {
+            return null;
+        }
+
+        $method = $payment->method;
+        if (in_array($method, ['credit', 'split'], true)) {
+            return null;
+        }
+
+        $account = Account::forPaymentMethod($method);
+        if (! $account) {
+            return null;
+        }
+
+        $amount = abs(round($ledgerAmount ?? (float) $payment->amount, 2));
+        if ($amount <= 0) {
+            return null;
+        }
+
+        $orderNumber = $payment->order?->order_number;
+
+        return $this->post(
+            account: $account,
+            direction: 'out',
+            amount: $amount,
+            description: 'Refund'.($orderNumber ? " — {$orderNumber}" : ''),
+            reference: $payment->reference_number,
+            paymentMethod: $method,
+            source: $payment,
+            transactedAt: $payment->created_at,
+        );
+    }
+
     public function postCashMovement(Account $account, string $type, float $amount, string $reason, ?Model $source = null): ?AccountTransaction
     {
         return $this->post(

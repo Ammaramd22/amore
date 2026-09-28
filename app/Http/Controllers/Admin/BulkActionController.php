@@ -15,6 +15,7 @@ use App\Models\Purchase;
 use App\Models\Recipe;
 use App\Models\RestaurantTable;
 use App\Models\Floor;
+use App\Models\Subcategory;
 use App\Models\Supplier;
 use App\Models\User;
 use Illuminate\Http\Request;
@@ -25,6 +26,7 @@ class BulkActionController extends Controller
         'products' => Product::class,
         'ingredients' => Ingredient::class,
         'categories' => Category::class,
+        'subcategories' => Subcategory::class,
         'customers' => Customer::class,
         'suppliers' => Supplier::class,
         'purchases' => Purchase::class,

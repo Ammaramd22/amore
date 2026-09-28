@@ -10,12 +10,13 @@ class Payment extends Model
     use HasFactory;
 
     protected $fillable = [
-        'order_id', 'method', 'amount', 'reference_number',
+        'order_id', 'method', 'amount', 'surcharge_amount', 'reference_number',
         'transaction_id', 'status', 'notes', 'created_by',
     ];
 
     protected $casts = [
         'amount' => 'decimal:2',
+        'surcharge_amount' => 'decimal:2',
     ];
 
     public function order()

@@ -41,6 +41,8 @@ class SettingController extends Controller
                 'cash_drawer_pin', 'open_drawer_after_print',
                 'shortcut_focus_search', 'shortcut_place_order', 'shortcut_pay_now', 'shortcut_open_bills',
                 'shift_method', 'business_day_cutoff',
+                'price_rounding_enabled', 'price_rounding_mode', 'price_rounding_unit',
+                'card_surcharge_enabled', 'card_surcharge_percent',
                 'customer_display_mode',
                 'customer_display_protocol',
                 'customer_display_baud',
@@ -249,6 +251,11 @@ class SettingController extends Controller
         'shortcut_open_bills' => 'Shortcut: Open Bills',
         'shift_method' => 'Shift Method',
         'business_day_cutoff' => 'Day-End Cutoff Time',
+        'price_rounding_enabled' => 'Enable Price Round-Up',
+        'price_rounding_mode' => 'Rounding Mode',
+        'price_rounding_unit' => 'Rounding Unit',
+        'card_surcharge_enabled' => 'Enable Card Surcharge',
+        'card_surcharge_percent' => 'Card Surcharge (%)',
         'day_end_email_enabled' => 'Email Report When Shift / Day Ends',
         'day_end_email_to' => 'Report Email To',
         'mail_mailer' => 'Mail Driver',
@@ -385,6 +392,11 @@ class SettingController extends Controller
         'shortcut_open_bills' => 'F-key for Open Bills (shown on button)',
         'shift_method' => 'Shift = each cashier opens/closes their own drawer. Day End = one store-wide opening cash / closing cash for the whole day (no per-cashier shifts).',
         'business_day_cutoff' => 'When Shift Method is on: after this time (e.g. 22:00), closing the last open shift also creates the Day End report with all shifts for that day.',
+        'price_rounding_enabled' => 'Round the bill total up after tax and service charge (e.g. 125.40 → 126.00 when unit is 1).',
+        'price_rounding_mode' => 'Currently only “up” (ceil) is supported.',
+        'price_rounding_unit' => 'Nearest currency step to round up to (1 = nearest 1.00).',
+        'card_surcharge_enabled' => 'Add a surcharge when the customer pays by card (including card lines in a split payment).',
+        'card_surcharge_percent' => 'Percent of the card portion added to the amount charged (default 3).',
         'day_end_email_enabled' => 'Send 80mm PDF report by email when a shift or day is closed',
         'day_end_email_to' => 'Admin email(s), comma-separated. Falls back to Business Email if empty.',
         'mail_mailer' => 'Use smtp for real email. Use log to write emails to the Laravel log (testing).',
@@ -783,6 +795,11 @@ class SettingController extends Controller
             'shortcut_pay_now' => 'pos',
             'shortcut_open_bills' => 'pos',
             'shift_method' => 'pos',
+            'price_rounding_enabled' => 'pos',
+            'price_rounding_mode' => 'pos',
+            'price_rounding_unit' => 'pos',
+            'card_surcharge_enabled' => 'pos',
+            'card_surcharge_percent' => 'pos',
             'day_end_email_enabled' => 'email',
             'day_end_email_to' => 'email',
             'mail_mailer' => 'email',
@@ -1096,6 +1113,24 @@ class SettingController extends Controller
                 'description' => 'HH:MM after which last shift close auto day-ends',
             ]
         );
+
+        foreach ([
+            'price_rounding_enabled' => ['1', 'boolean', 'Round POS bill totals up to the nearest rounding unit'],
+            'price_rounding_mode' => ['up', 'string', 'Rounding mode (up = always round up)'],
+            'price_rounding_unit' => ['1', 'float', 'Currency unit to round to (e.g. 1 = nearest 1.00)'],
+            'card_surcharge_enabled' => ['1', 'boolean', 'Add a percentage surcharge on card payments'],
+            'card_surcharge_percent' => ['3', 'float', 'Card surcharge percent (applied to card portion only)'],
+        ] as $key => [$default, $type, $desc]) {
+            Setting::firstOrCreate(
+                ['key' => $key],
+                [
+                    'value' => $default,
+                    'type' => $type,
+                    'group' => 'pos',
+                    'description' => $desc,
+                ]
+            );
+        }
 
         Setting::firstOrCreate(
             ['key' => 'timezone'],

@@ -94,9 +94,27 @@ class Product extends Model
         return $this->hasMany(ProductVariant::class);
     }
 
+    /** Legacy per-product add-on rows (kept for order history / migration). */
     public function addons()
     {
         return $this->hasMany(ProductAddon::class);
+    }
+
+    /** Shared add-ons catalog (many-to-many). Prefer this for POS / admin. */
+    public function sharedAddons()
+    {
+        return $this->belongsToMany(Addon::class, 'addon_product')->withTimestamps();
+    }
+
+    /** Active add-ons for POS: shared catalog first, else legacy rows. */
+    public function posAddons()
+    {
+        $shared = $this->sharedAddons()->active()->ordered()->get();
+        if ($shared->isNotEmpty()) {
+            return $shared;
+        }
+
+        return $this->addons()->active()->orderBy('name')->get();
     }
 
     public function partnerPrices()

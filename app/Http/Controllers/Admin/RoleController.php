@@ -19,6 +19,8 @@ class RoleController extends Controller
         'Roles' => ['roles'],
         'Branches' => ['branches'],
         'Categories' => ['categories'],
+        'Add-ons' => ['addons'],
+        'Subcategories' => ['subcategories'],
         'Products' => ['products'],
         'Ingredients' => ['ingredients'],
         'Recipes' => ['recipes'],

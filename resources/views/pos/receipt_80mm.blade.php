@@ -132,6 +132,7 @@
         @foreach($liveItems as $item)
         @php
             $isFree = (float) $item->total_price <= 0 || str_contains(strtoupper((string) $item->special_instructions), 'LOYALTY FREE');
+            $isComp = (bool) ($item->is_comp ?? false) || str_contains(strtoupper((string) $item->product_name), 'COMP');
             $itemDisc = (float) ($item->discount_amount ?? 0);
             $lineNet = (float) $item->total_price;
             $lineGross = $lineNet + $itemDisc;
@@ -140,12 +141,12 @@
             $qtyLabel = rtrim(rtrim(number_format($qty, 3, '.', ''), '0'), '.') ?: '0';
         @endphp
         <tr class="receipt-item-row">
-            <td colspan="3">{{ $item->product_name }}{{ $isFree ? ' [FREE]' : '' }}</td>
+            <td colspan="3">{{ $item->product_name }}{{ $isComp ? ' [COMP]' : ($isFree ? ' [FREE]' : '') }}</td>
         </tr>
         <tr class="receipt-item-disc">
-            <td>{{ $isFree ? 'FREE' : (number_format($unitDisplay, 2).' × '.$qtyLabel) }}</td>
-            <td class="right">{{ ($itemDisc > 0 && ! $isFree) ? number_format($itemDisc, 2) : '—' }}</td>
-            <td class="right">{{ $isFree ? 'FREE' : number_format($lineNet, 2) }}</td>
+            <td>{{ ($isFree || $isComp) ? ($isComp ? 'COMP' : 'FREE') : (number_format($unitDisplay, 2).' × '.$qtyLabel) }}</td>
+            <td class="right">{{ ($itemDisc > 0 && ! $isFree && ! $isComp) ? number_format($itemDisc, 2) : '—' }}</td>
+            <td class="right">{{ ($isFree || $isComp) ? ($isComp ? 'COMP' : 'FREE') : number_format($lineNet, 2) }}</td>
         </tr>
         @endforeach
         @else
@@ -157,14 +158,15 @@
         @foreach($liveItems as $item)
         @php
             $isFree = (float) $item->total_price <= 0 || str_contains(strtoupper((string) $item->special_instructions), 'LOYALTY FREE');
+            $isComp = (bool) ($item->is_comp ?? false) || str_contains(strtoupper((string) $item->product_name), 'COMP');
             $lineNet = (float) $item->total_price;
             $qty = (float) $item->quantity;
             $qtyLabel = rtrim(rtrim(number_format($qty, 3, '.', ''), '0'), '.') ?: '0';
         @endphp
         <tr class="receipt-item-row">
-            <td>{{ $item->product_name }}{{ $isFree ? ' [FREE]' : '' }}</td>
+            <td>{{ $item->product_name }}{{ $isComp ? ' [COMP]' : ($isFree ? ' [FREE]' : '') }}</td>
             <td class="right">{{ $qtyLabel }}</td>
-            <td class="right">{{ $isFree ? 'FREE' : number_format($lineNet, 2) }}</td>
+            <td class="right">{{ ($isFree || $isComp) ? ($isComp ? 'COMP' : 'FREE') : number_format($lineNet, 2) }}</td>
         </tr>
         @endforeach
         @endif
@@ -187,7 +189,13 @@
         @if($order->delivery_charge > 0)
         <tr><td>Delivery</td><td class="right">{{ number_format($order->delivery_charge, 2) }}</td></tr>
         @endif
-        <tr class="receipt-total-row"><td>TOTAL</td><td class="right">{{ number_format($order->total_amount, 2) }}</td></tr>
+        @if((float) ($order->rounding_amount ?? 0) != 0)
+        <tr><td>Rounding</td><td class="right">{{ number_format($order->rounding_amount, 2) }}</td></tr>
+        @endif
+        @if((float) ($order->card_surcharge_amount ?? 0) > 0)
+        <tr><td>Card surcharge</td><td class="right">{{ number_format($order->card_surcharge_amount, 2) }}</td></tr>
+        @endif
+        <tr class="receipt-total-row"><td>TOTAL</td><td class="right">{{ number_format((float) $order->total_amount + (float) ($order->card_surcharge_amount ?? 0), 2) }}</td></tr>
         @if($byMethod->isNotEmpty())
             @foreach($byMethod as $method => $amount)
             <tr><td>{{ $methodLabel($method) }}</td><td class="right">{{ number_format($amount, 2) }}</td></tr>

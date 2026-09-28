@@ -26,6 +26,8 @@ class RolePermissionSeeder extends Seeder
 
             // Menu
             'categories.view', 'categories.create', 'categories.edit', 'categories.delete',
+            'addons.view', 'addons.create', 'addons.edit', 'addons.delete',
+            'subcategories.view', 'subcategories.create', 'subcategories.edit', 'subcategories.delete',
             'products.view', 'products.create', 'products.edit', 'products.delete',
             'ingredients.view', 'ingredients.create', 'ingredients.edit', 'ingredients.delete',
             'recipes.view', 'recipes.create', 'recipes.edit', 'recipes.delete',
@@ -45,8 +47,8 @@ class RolePermissionSeeder extends Seeder
             'tables.view', 'tables.create', 'tables.edit', 'tables.delete',
 
             // Orders / POS
-            'orders.view', 'orders.create', 'orders.edit', 'orders.delete', 'orders.void',
-            'pos.access', 'pos.hold', 'pos.discount', 'pos.void',
+            'orders.view', 'orders.create', 'orders.edit', 'orders.delete', 'orders.void', 'orders.refund', 'orders.comp',
+            'pos.access', 'pos.hold', 'pos.discount', 'pos.void', 'pos.comp', 'pos.refund',
 
             // Kitchen / waiter / delivery
             'kitchen.view', 'kitchen.prepare', 'kitchen.ready', 'kitchen.serve', 'kitchen.manage',
@@ -105,6 +107,8 @@ class RolePermissionSeeder extends Seeder
                 'dashboard.view',
                 'users.view', 'users.create', 'users.edit',
                 'categories.view', 'categories.create', 'categories.edit',
+                'addons.view', 'addons.create', 'addons.edit',
+                'subcategories.view', 'subcategories.create', 'subcategories.edit',
                 'products.view', 'products.create', 'products.edit',
                 'ingredients.view', 'ingredients.create', 'ingredients.edit',
                 'recipes.view', 'recipes.create', 'recipes.edit',
