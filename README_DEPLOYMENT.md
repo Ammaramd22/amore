@@ -1,25 +1,34 @@
-# Restaurant POS — Production Deployment (Start Here)
+# Amore POS / QRPOS — Production Deployment (Start Here)
 
-This folder contains everything needed to deploy **Restaurant POS (QRPOS)** to a standard **cPanel / shared hosting** environment **without changing application behavior**.
+This folder contains everything needed to deploy **Amore POS (QRPOS By Avenque)** to a standard **cPanel / shared hosting** environment **without changing application behavior**.
 
 ## Read these guides in order
 
 | # | Document | Purpose |
 |---|----------|---------|
-| 1 | [CPANEL_INSTALL.md](CPANEL_INSTALL.md) | Step-by-step cPanel upload, extract, document root, installer |
-| 2 | [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) | Full production guide: requirements, env, cron, queue, integrations |
-| 3 | [PRODUCTION_CHECKLIST.md](PRODUCTION_CHECKLIST.md) | Pre-flight + go-live checklist |
-| 4 | [POST_DEPLOYMENT_TESTS.md](POST_DEPLOYMENT_TESTS.md) | Smoke tests for every major module |
+| 1 | [AMORE_CPANEL_FRESH_INSTALL.md](AMORE_CPANEL_FRESH_INSTALL.md) | **Amore fresh install** — upload, DB, document root, `/install`, cron, checklist |
+| 2 | [CPANEL_INSTALL.md](CPANEL_INSTALL.md) | Additional cPanel notes (same installer flow) |
+| 3 | [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) | Full production guide: requirements, env, cron, queue, integrations |
+| 4 | [PRODUCTION_CHECKLIST.md](PRODUCTION_CHECKLIST.md) | Pre-flight + go-live checklist |
+| 5 | [POST_DEPLOYMENT_TESTS.md](POST_DEPLOYMENT_TESTS.md) | Smoke tests for every major module |
 
 ## Production ZIP
 
-Use the packaged archive created alongside this project:
+Build on a machine with PHP 8.2+, Composer, and Node:
 
-```text
-../RestaurantPOS-Production-20260807.zip
+```powershell
+composer install --no-dev --optimize-autoloader
+npm install
+npm run build
+powershell -ExecutionPolicy Bypass -File scripts\package-production.ps1
 ```
 
-(Rebuild later with `scripts/package-production.ps1` → `RestaurantPOS-Production-YYYYMMDD.zip`.)
+Creates:
+
+```text
+../AmorePOS-Production-YYYYMMDD-HHMM.zip
+./AmorePOS-Production-Latest.zip
+```
 
 That ZIP is built for direct cPanel upload and includes:
 
@@ -30,11 +39,11 @@ That ZIP is built for direct cPanel upload and includes:
 - Deployment documentation (these `.md` files)
 - `.env.example` (configure via web installer or manually)
 
-It **excludes**: `.git`, `.github`, `node_modules`, local `.env`, IDE junk, OS junk, PHPUnit tests, and temporary build logs.
+It **excludes**: `.git`, `.github`, `node_modules`, local `.env`, IDE junk, OS junk, PHPUnit tests, host-specific `php.ini`/`.user.ini`, install lock, and temporary build logs.
 
 ## Fastest path (cPanel)
 
-1. Upload and extract the production ZIP under your hosting account (e.g. `~/restaurantpos` or inside `public_html`).
+1. Upload and extract the production ZIP (e.g. `~/amorepos`).
 2. Point the domain/subdomain **document root** to the app’s `public/` folder (preferred), **or** leave document root at the project root (root `.htaccess` forwards into `public/`).
 3. Create a MySQL database + user in cPanel.
 4. Open `https://your-domain.com/install` and complete the web wizard.
