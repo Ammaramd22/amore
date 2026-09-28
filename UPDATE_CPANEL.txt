@@ -1,0 +1,9 @@
+Zingers QRPOS — Waiter PWA edit items + notes fix
+
+FIX:
+- Edit open bill now shows existing items (JS dirty-variable bug)
+- Clear Add/Edit note on each item (prints bold on KOT)
+- Note-only changes also send modified KOT to kitchen
+- Always use update API when editing an open table bill
+
+Deploy: extract (keep .env) → hard-refresh Waiter PWA (Ctrl+F5 / clear site data)
