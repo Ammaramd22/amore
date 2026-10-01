@@ -216,7 +216,7 @@
                         <tr>
                             <td class="acct-date">
                                 <span class="acct-date-day">{{ $tx->transacted_at?->format('d M Y') }}</span>
-                                <span class="acct-date-time">{{ $tx->transacted_at?->format('H:i') }}</span>
+                                <span class="acct-date-time">{{ \App\Models\Setting::formatDateTime($tx->transacted_at, 'H:i') }}</span>
                             </td>
                             <td>
                                 <div class="acct-desc">{{ $tx->description }}</div>

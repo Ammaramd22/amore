@@ -1,5 +1,7 @@
 @extends('layouts.pos')
 
+{{-- amore-pos-build: 20261001-modifiers-v5 --}}
+
 @section('title', 'POS Billing')
 
 @php
@@ -295,6 +297,7 @@ let currentEditOrderId = null;
 let pendingProduct = null;
 let selectedVariant = null;
 let selectedAddons = [];
+let selectedOptions = [];
 let editingCartIndex = null;
 
 // Kitchen notification system
@@ -361,8 +364,14 @@ function checkKitchenNotifications() {
         .catch(() => {});
 }
 
-// Check every 5 seconds
-setInterval(checkKitchenNotifications, 5000);
+function smartPosInterval(fn, ms) {
+    return setInterval(function () {
+        if (document.hidden) return;
+        fn();
+    }, ms);
+}
+// Check every 5 seconds (paused when tab hidden)
+smartPosInterval(checkKitchenNotifications, 5000);
 
 function productCategoryId(productId) {
     const el = document.querySelector(`.product-item[data-id="${productId}"]`);
@@ -371,11 +380,33 @@ function productCategoryId(productId) {
 
 function handleProductClick(productId, name, price, hasVariants, hasAddons, options = {}) {
     editingCartIndex = null;
-    if (hasAddons || hasVariants) {
-        pendingProduct = { productId, name, price, hasVariants, hasAddons, category_id: productCategoryId(productId) };
+    const extras = (window.__POS_PRODUCT_EXTRAS && window.__POS_PRODUCT_EXTRAS[productId])
+        ? window.__POS_PRODUCT_EXTRAS[productId]
+        : null;
+    let embedded = null;
+    if (extras) {
+        embedded = {
+            id: productId,
+            name,
+            price: Number(price),
+            variants: null,
+            addons: extras.addons || [],
+            modifier_sets: extras.modifier_sets || [],
+            option_sets: extras.option_sets || [],
+        };
+    }
+    const hasExtras = !!(hasAddons
+        || (embedded && ((embedded.modifier_sets || []).length || (embedded.option_sets || []).length || (embedded.addons || []).length)));
+
+    if (hasExtras || hasVariants) {
+        pendingProduct = { productId, name, price, hasVariants, hasAddons: hasExtras, category_id: productCategoryId(productId) };
         selectedAddons = [];
+        selectedOptions = [];
         selectedVariant = null;
-        showProductOptionsModal(productId, name, price, hasVariants, hasAddons);
+        showProductOptionsModal(productId, name, price, hasVariants, hasExtras, {
+            productSeed: embedded,
+            keepSearchFocus: !!(options && options.keepSearchFocus),
+        });
         return;
     }
 
@@ -409,20 +440,32 @@ function editCartItemOptions(index) {
 
             const variants = product.variants || [];
             const addons = product.addons || [];
+            const optionSets = product.option_sets || [];
+            const modifierSets = product.modifier_sets || [];
             const baseName = cartItemBaseName(item);
             const basePrice = Number(product.price ?? product.selling_price ?? item.base_price ?? item.price);
+            const hasExtras = addons.length > 0 || optionSets.length > 0 || modifierSets.length > 0 || !!product.has_addons;
 
             editingCartIndex = index;
             selectedAddons = (item.addons || []).map(a => ({
                 id: a.id,
                 name: a.name,
                 price: Number(a.price || 0),
+                shared: a.shared !== false,
+                hide_on_receipt: !!a.hide_on_receipt,
+                group_id: a.group_id || null,
+            }));
+            selectedOptions = (item.options || []).map(o => ({
+                id: o.id || o.option_id,
+                name: o.name || o.option_name,
+                option_set_id: o.option_set_id,
+                option_set_name: o.option_set_name || o.set_name || 'Option',
             }));
             selectedVariant = item.variant_id
                 ? {
                     id: item.variant_id,
                     name: item.variant_name || '',
-                    price_adjustment: 0,
+                    price_adjustment: Number(item.variant_adj || 0),
                 }
                 : null;
 
@@ -431,7 +474,7 @@ function editCartItemOptions(index) {
                 name: baseName,
                 price: basePrice,
                 hasVariants: variants.length > 0,
-                hasAddons: addons.length > 0,
+                hasAddons: hasExtras,
             };
 
             showProductOptionsModal(
@@ -439,7 +482,7 @@ function editCartItemOptions(index) {
                 baseName,
                 basePrice,
                 variants.length > 0,
-                addons.length > 0,
+                hasExtras,
                 {
                     product,
                     instructions: item.special_instructions || '',
@@ -498,14 +541,15 @@ function showProductOptionsModal(productId, name, price, hasVariants, hasAddons,
 
     if (hasVariants) {
         html += `<div class="mb-3">
-            <label class="form-label fw-semibold text-muted">Portion / Size</label>
+            <label class="form-label fw-semibold text-muted">Select Variation</label>
             <div id="variantList" class="d-grid gap-2">Loading...</div>
         </div>`;
     }
 
-    if (hasAddons) {
-        html += '<div class="mb-3"><label class="form-label fw-semibold text-muted">Select Add-ons</label><div id="addonList" class="d-grid gap-2">Loading...</div></div>';
-    }
+    // Always reserve Options / Modifiers slots — shown after product API load.
+    // Do not rely only on the product-card hasAddons flag (modifier sets can be missed).
+    html += '<div class="mb-3 d-none" id="optionSetsSection"><label class="form-label fw-semibold text-muted">Options</label><div id="optionSetList" class="d-grid gap-2">Loading...</div></div>';
+    html += '<div class="mb-3 d-none" id="modifiersSection"><label class="form-label fw-semibold text-muted">Select Modifiers</label><div id="addonList" class="d-grid gap-2">Loading...</div></div>';
 
     html += `<div class="mb-3">
         <label class="form-label fw-semibold text-muted">Special Instructions</label>
@@ -528,78 +572,204 @@ function showProductOptionsModal(productId, name, price, hasVariants, hasAddons,
         if (hasVariants) {
             const variants = product.variants || [];
             const list = document.getElementById('variantList');
-            if (!list) return;
-            if (!variants.length) {
-                list.innerHTML = '<p class="text-muted text-center mb-0">No portions available</p>';
-            } else {
-                const prefId = selectedVariant?.id || null;
-                list.innerHTML = variants.map((v) => {
-                    const adj = Number(v.price_adjustment || 0);
-                    const adjLabel = adj === 0 ? '' : (adj > 0 ? `+LKR ${adj.toFixed(2)}` : `-LKR ${Math.abs(adj).toFixed(2)}`);
-                    const safeName = String(v.name).replace(/'/g, "\\'");
-                    const checked = prefId ? (v.id === prefId) : false;
-                    return `<div class="variant-option d-flex align-items-center p-3 rounded-3 border cursor-pointer" style="background:#fff;border-color:#e2e8f0;"
-                         onclick="selectVariant(${v.id}, '${safeName}', ${adj}, this)">
-                        <input type="radio" name="productVariant" class="form-check-input me-3" style="width:20px;height:20px;" ${checked ? 'checked' : ''}>
-                        <div class="flex-grow-1"><div class="fw-semibold">${v.name}</div></div>
-                        <div class="fw-bold" style="color:#f59e0b;">${adjLabel || 'Base'}</div>
-                    </div>`;
-                }).join('');
+            if (list) {
+                if (!variants.length) {
+                    list.innerHTML = '<p class="text-muted text-center mb-0">No variations available</p>';
+                } else {
+                    const prefId = selectedVariant?.id || null;
+                    list.innerHTML = variants.map((v) => {
+                        const adj = Number(v.price_adjustment || 0);
+                        const finalPrice = Number(v.final_price != null ? v.final_price : (Number(price) + adj));
+                        const safeName = String(v.name).replace(/'/g, "\\'");
+                        const checked = prefId ? (v.id === prefId) : false;
+                        return `<div class="variant-option d-flex align-items-center p-3 rounded-3 border cursor-pointer" style="background:#fff;border-color:#e2e8f0;"
+                             onclick="selectVariant(${v.id}, '${safeName}', ${adj}, this)">
+                            <input type="radio" name="productVariant" class="form-check-input me-3" style="width:20px;height:20px;" ${checked ? 'checked' : ''}>
+                            <div class="flex-grow-1"><div class="fw-semibold">${v.name}</div></div>
+                            <div class="fw-bold" style="color:#f59e0b;">LKR ${finalPrice.toFixed(2)}</div>
+                        </div>`;
+                    }).join('');
 
-                let pick = prefId ? variants.find(v => v.id === prefId) : variants[0];
-                if (!pick) pick = variants[0];
-                const el = [...list.querySelectorAll('.variant-option')].find((_, i) => variants[i].id === pick.id)
-                    || list.querySelector('.variant-option');
-                selectVariant(pick.id, pick.name, pick.price_adjustment, el);
+                    let pick = prefId ? variants.find(v => v.id === prefId) : variants[0];
+                    if (!pick) pick = variants[0];
+                    const el = [...list.querySelectorAll('.variant-option')].find((_, i) => variants[i].id === pick.id)
+                        || list.querySelector('.variant-option');
+                    selectVariant(pick.id, pick.name, pick.price_adjustment, el);
+                }
             }
         }
 
-        if (hasAddons) {
+        {
             const addons = product.addons || [];
-            const list = document.getElementById('addonList');
-            if (!list) return;
-            if (!addons.length) {
-                list.innerHTML = '<p class="text-muted text-center mb-0">No add-ons available</p>';
-            } else {
-                const selectedIds = new Set(selectedAddons.map(a => a.id));
-                list.innerHTML = addons.map(addon => {
-                    const safeName = String(addon.name).replace(/'/g, "\\'");
-                    const on = selectedIds.has(addon.id);
-                    return `<div class="d-flex align-items-center p-3 rounded-3 border cursor-pointer" style="background:${on ? '#ecfdf5' : '#fff'};border-color:${on ? '#10b981' : '#e2e8f0'};"
-                         onclick="toggleAddon(${addon.id}, '${safeName}', ${addon.price}, this)">
-                        <input type="checkbox" class="form-check-input me-3" style="width:20px;height:20px;cursor:pointer;pointer-events:none;" ${on ? 'checked' : ''}>
-                        <div class="flex-grow-1"><div class="fw-semibold">${addon.name}</div></div>
-                        <div class="fw-bold" style="color:#f59e0b;">+LKR ${parseFloat(addon.price).toFixed(2)}</div>
-                    </div>`;
-                }).join('');
-                // Keep selectedAddons synced to available addon prices/names
-                selectedAddons = addons
-                    .filter(a => selectedIds.has(a.id))
-                    .map(a => ({ id: a.id, name: a.name, price: Number(a.price) }));
-                updateOptionsTotal();
+            const sets = product.modifier_sets || [];
+            const optionSets = product.option_sets || [];
+            window._pendingModifierSets = sets;
+            window._pendingOptionSets = optionSets;
+
+            const optSection = document.getElementById('optionSetsSection');
+            const optList = document.getElementById('optionSetList');
+            if (optList && optSection) {
+                if (!optionSets.length) {
+                    optSection.classList.add('d-none');
+                    optList.innerHTML = '';
+                    selectedOptions = [];
+                } else {
+                    optSection.classList.remove('d-none');
+                    const selectedBySet = {};
+                    (selectedOptions || []).forEach(o => { selectedBySet[o.option_set_id] = o.id; });
+                    optList.innerHTML = optionSets.map(set => {
+                        const label = set.display_name || set.name;
+                        const req = set.require_selection ? ' <span class="badge bg-warning text-dark">Required</span>' : '';
+                        const rows = (set.options || []).map(o => {
+                            const on = selectedBySet[set.id] ? (selectedBySet[set.id] === o.id) : false;
+                            const safeName = String(o.name).replace(/'/g, "\\'");
+                            const safeSet = String(label).replace(/'/g, "\\'");
+                            const colorDot = (set.type === 'text_color' && o.color)
+                                ? `<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:${o.color};border:1px solid #ccc;margin-right:8px;"></span>`
+                                : '';
+                            return `<div class="d-flex align-items-center p-3 rounded-3 border cursor-pointer option-choice" style="background:${on ? '#ecfdf5' : '#fff'};border-color:${on ? '#10b981' : '#e2e8f0'};"
+                                onclick="selectProductOption(${set.id}, '${safeSet}', ${o.id}, '${safeName}', this)">
+                                <input type="radio" name="optset_${set.id}" class="form-check-input me-3" style="width:20px;height:20px;pointer-events:none;" ${on ? 'checked' : ''}>
+                                ${colorDot}
+                                <div class="flex-grow-1 fw-semibold">${o.name}</div>
+                            </div>`;
+                        }).join('');
+                        return `<div class="mb-2 option-set-block" data-set-id="${set.id}" data-require="${set.require_selection ? 1 : 0}"><div class="small fw-semibold text-muted mb-1">${label}${req}</div><div class="d-grid gap-2">${rows}</div></div>`;
+                    }).join('');
+                    // Keep only still-valid selections
+                    const validIds = new Set(optionSets.flatMap(s => (s.options || []).map(o => o.id)));
+                    selectedOptions = (selectedOptions || []).filter(o => validIds.has(o.id));
+                }
             }
-        } else {
+
+            const modSection = document.getElementById('modifiersSection');
+            const list = document.getElementById('addonList');
+            if (list) {
+                if (!addons.length && !sets.length) {
+                    if (modSection) modSection.classList.add('d-none');
+                    list.innerHTML = '';
+                } else {
+                    if (modSection) modSection.classList.remove('d-none');
+                    const selectedIds = new Set(selectedAddons.map(a => a.id));
+                    const isEditMode = selectedIds.size > 0;
+                    const renderAddonRow = (addon, set) => {
+                        const safeName = String(addon.name).replace(/'/g, "\\'");
+                        const allowMulti = set ? (set.allow_multiple !== false) : true;
+                        const groupId = set ? set.id : 0;
+                        const hideReceipt = !!(set && set.hide_on_receipt) || !!addon.hide_on_receipt;
+                        let on = selectedIds.has(addon.id);
+                        if (!isEditMode && !on && addon.is_preselected) on = true;
+                        const inputType = allowMulti ? 'checkbox' : 'radio';
+                        const priceLabel = Number(addon.price) > 0
+                            ? `+LKR ${parseFloat(addon.price).toFixed(2)}`
+                            : 'LKR 0.00';
+                        return `<div class="d-flex align-items-center p-3 rounded-3 border cursor-pointer modifier-option" data-group-id="${groupId}" data-allow-multiple="${allowMulti ? 1 : 0}" style="background:${on ? '#ecfdf5' : '#fff'};border-color:${on ? '#10b981' : '#e2e8f0'};"
+                             onclick="toggleAddon(${addon.id}, '${safeName}', ${addon.price}, this, true, ${groupId}, ${hideReceipt ? 'true' : 'false'}, ${allowMulti ? 'true' : 'false'})">
+                            <input type="${inputType}" name="modset_${groupId}" class="form-check-input me-3" style="width:20px;height:20px;cursor:pointer;pointer-events:none;" ${on ? 'checked' : ''}>
+                            <div class="flex-grow-1"><div class="fw-semibold">${addon.name}</div></div>
+                            <div class="fw-bold" style="color:#f59e0b;">${priceLabel}</div>
+                        </div>`;
+                    };
+
+                    if (sets.length) {
+                        const shown = new Set();
+                        let htmlSets = sets.map(set => {
+                            const label = set.display_name || set.name;
+                            const req = set.require_selection ? ' <span class="badge bg-warning text-dark">Required</span>' : '';
+                            const rows = (set.addons || []).map(a => {
+                                shown.add(a.id);
+                                return renderAddonRow(a, set);
+                            }).join('');
+                            return `<div class="mb-2 modifier-set-block" data-set-id="${set.id}" data-require="${set.require_selection ? 1 : 0}" data-allow-multiple="${set.allow_multiple !== false ? 1 : 0}"><div class="small fw-semibold text-muted mb-1">${label}${req}</div><div class="d-grid gap-2">${rows}</div></div>`;
+                        }).join('');
+                        const extras = addons.filter(a => !shown.has(a.id));
+                        if (extras.length) {
+                            htmlSets += `<div class="mb-2"><div class="small fw-semibold text-muted mb-1">Other modifiers</div><div class="d-grid gap-2">${extras.map(a => renderAddonRow(a, null)).join('')}</div></div>`;
+                        }
+                        list.innerHTML = htmlSets;
+                    } else {
+                        list.innerHTML = addons.map(a => renderAddonRow(a, null)).join('');
+                    }
+
+                    // Sync selectedAddons from checked rows (includes preselect)
+                    selectedAddons = [];
+                    list.querySelectorAll('.modifier-option').forEach(el => {
+                        const input = el.querySelector('input');
+                        if (!input || !input.checked) return;
+                        const onclick = el.getAttribute('onclick') || '';
+                        const m = onclick.match(/toggleAddon\((\d+),\s*'((?:\\'|[^'])*)',\s*([-\d.]+),\s*this,\s*(true|false),\s*(\d+),\s*(true|false)/);
+                        if (m) {
+                            selectedAddons.push({
+                                id: Number(m[1]),
+                                name: m[2].replace(/\\'/g, "'"),
+                                price: Number(m[3]),
+                                shared: true,
+                                group_id: Number(m[5]) || null,
+                                hide_on_receipt: m[6] === 'true',
+                            });
+                        }
+                    });
+                }
+            }
             updateOptionsTotal();
         }
     };
 
     if (opts.product) {
         applyProductOptions(opts.product);
-    } else if (hasVariants || hasAddons) {
-        fetch(`/pos/products?id=${productId}`)
+    } else {
+        // Use embedded card data immediately so modifiers show even if API is stale/cached
+        if (opts.productSeed) {
+            applyProductOptions(opts.productSeed);
+        }
+        fetch(`/pos/products?id=${productId}&_=${Date.now()}`)
             .then(r => r.json())
             .then(data => {
                 const product = (data.products || []).find(p => p.id === productId) || (data.products || [])[0];
-                applyProductOptions(product);
+                if (!product) return;
+                // Merge: prefer API variants; keep modifiers from API if present else seed
+                const seed = opts.productSeed || {};
+                const merged = {
+                    ...seed,
+                    ...product,
+                    variants: product.variants || [],
+                    modifier_sets: (product.modifier_sets && product.modifier_sets.length)
+                        ? product.modifier_sets
+                        : (seed.modifier_sets || []),
+                    option_sets: (product.option_sets && product.option_sets.length)
+                        ? product.option_sets
+                        : (seed.option_sets || []),
+                    addons: (product.addons && product.addons.length)
+                        ? product.addons
+                        : (seed.addons || []),
+                };
+                if (typeof console !== 'undefined') {
+                    console.log('[Amore POS] product options', {
+                        id: productId,
+                        modifier_sets: (merged.modifier_sets || []).length,
+                        option_sets: (merged.option_sets || []).length,
+                        addons: (merged.addons || []).length,
+                        extras_map: !!(window.__POS_PRODUCT_EXTRAS && window.__POS_PRODUCT_EXTRAS[productId]),
+                    });
+                }
+                window.__POS_PRODUCT_EXTRAS = window.__POS_PRODUCT_EXTRAS || {};
+                window.__POS_PRODUCT_EXTRAS[productId] = {
+                    modifier_sets: merged.modifier_sets || [],
+                    option_sets: merged.option_sets || [],
+                    addons: merged.addons || [],
+                    variants: merged.variants || [],
+                };
+                applyProductOptions(merged);
             })
             .catch(() => {
-                const v = document.getElementById('variantList');
-                const a = document.getElementById('addonList');
-                if (v) v.innerHTML = '<p class="text-muted text-center mb-0">Failed to load portions</p>';
-                if (a) a.innerHTML = '<p class="text-muted text-center mb-0">Failed to load add-ons</p>';
+                if (!opts.productSeed) {
+                    const v = document.getElementById('variantList');
+                    const a = document.getElementById('addonList');
+                    if (v) v.innerHTML = '<p class="text-muted text-center mb-0">Failed to load variations</p>';
+                    if (a) a.innerHTML = '<p class="text-muted text-center mb-0">Failed to load modifiers</p>';
+                    updateOptionsTotal();
+                }
             });
-    } else {
-        updateOptionsTotal();
     }
 }
 
@@ -611,20 +781,68 @@ function escapeAttr(s) {
         .replace(/"/g, '&quot;');
 }
 
-function toggleAddon(addonId, name, price, element) {
-    const checkbox = element.querySelector('input[type="checkbox"]');
-    if (!checkbox) return;
-    if (document.activeElement !== checkbox) {
-        checkbox.checked = !checkbox.checked;
+function selectProductOption(setId, setName, optionId, optionName, element) {
+    const block = element.closest('.option-set-block');
+    if (block) {
+        block.querySelectorAll('.option-choice').forEach(el => {
+            el.style.background = '#fff';
+            el.style.borderColor = '#e2e8f0';
+            const inp = el.querySelector('input');
+            if (inp) inp.checked = false;
+        });
     }
+    element.style.background = '#ecfdf5';
+    element.style.borderColor = '#10b981';
+    const inp = element.querySelector('input');
+    if (inp) inp.checked = true;
+
+    selectedOptions = (selectedOptions || []).filter(o => Number(o.option_set_id) !== Number(setId));
+    selectedOptions.push({
+        id: optionId,
+        option_id: optionId,
+        name: optionName,
+        option_name: optionName,
+        option_set_id: setId,
+        option_set_name: setName,
+    });
+}
+
+function toggleAddon(addonId, name, price, element, shared = true, groupId = 0, hideOnReceipt = false, allowMultiple = true) {
+    const checkbox = element.querySelector('input');
+    if (!checkbox) return;
+
+    if (!allowMultiple) {
+        // Single-select within this set: clear others in the same group
+        const block = element.closest('.modifier-set-block') || element.parentElement;
+        (block ? block.querySelectorAll('.modifier-option') : []).forEach(el => {
+            if (el === element) return;
+            const inp = el.querySelector('input');
+            if (inp) inp.checked = false;
+            el.style.background = '#fff';
+            el.style.borderColor = '#e2e8f0';
+        });
+        selectedAddons = selectedAddons.filter(a => Number(a.group_id || 0) !== Number(groupId || 0));
+        checkbox.checked = true;
+    } else {
+        if (document.activeElement !== checkbox) {
+            checkbox.checked = !checkbox.checked;
+        }
+    }
+
     const isSelected = checkbox.checked;
 
     if (isSelected) {
         element.style.background = '#ecfdf5';
         element.style.borderColor = '#10b981';
-        if (!selectedAddons.find(a => a.id === addonId)) {
-            selectedAddons.push({ id: addonId, name, price: Number(price) });
-        }
+        selectedAddons = selectedAddons.filter(a => a.id !== addonId);
+        selectedAddons.push({
+            id: addonId,
+            name,
+            price: Number(price),
+            shared: !!shared,
+            group_id: groupId || null,
+            hide_on_receipt: !!hideOnReceipt,
+        });
     } else {
         element.style.background = '#fff';
         element.style.borderColor = '#e2e8f0';
@@ -638,8 +856,37 @@ function confirmAddToCart() {
     if (!pendingProduct) return;
 
     if (pendingProduct.hasVariants && !selectedVariant) {
-        if (typeof showToast === 'function') showToast('warning', 'Select a portion / size');
+        if (typeof showToast === 'function') showToast('warning', 'Select a variation');
         return;
+    }
+
+    const sets = window._pendingModifierSets || [];
+    for (const set of sets) {
+        if (!set.require_selection) continue;
+        const ids = new Set((set.addons || []).map(a => a.id));
+        const picked = selectedAddons.some(a => ids.has(a.id));
+        if (!picked) {
+            const label = set.display_name || set.name || 'modifiers';
+            if (typeof showToast === 'function') showToast('warning', 'Select required: ' + label);
+            return;
+        }
+        if (set.allow_multiple === false) {
+            const count = selectedAddons.filter(a => ids.has(a.id)).length;
+            if (count > 1) {
+                if (typeof showToast === 'function') showToast('warning', 'Only one option allowed in ' + (set.display_name || set.name));
+                return;
+            }
+        }
+    }
+
+    const optionSets = window._pendingOptionSets || [];
+    for (const set of optionSets) {
+        if (!set.require_selection) continue;
+        const picked = (selectedOptions || []).some(o => Number(o.option_set_id) === Number(set.id));
+        if (!picked) {
+            if (typeof showToast === 'function') showToast('warning', 'Select required: ' + (set.display_name || set.name));
+            return;
+        }
     }
 
     const instructions = document.getElementById('specialInstructions')?.value || '';
@@ -662,7 +909,8 @@ function confirmAddToCart() {
         item.variant_id = selectedVariant?.id || null;
         item.variant_name = selectedVariant?.name || null;
         item.addons = [...selectedAddons];
-        item.has_options = !!(selectedVariant || selectedAddons.length);
+        item.options = [...(selectedOptions || [])];
+        item.has_options = !!(selectedVariant || selectedAddons.length || (selectedOptions || []).length);
         item.special_instructions = instructions;
 
         updateCart();
@@ -673,6 +921,7 @@ function confirmAddToCart() {
 
         pendingProduct = null;
         selectedAddons = [];
+        selectedOptions = [];
         selectedVariant = null;
         editingCartIndex = null;
         return;
@@ -682,6 +931,7 @@ function confirmAddToCart() {
         !item.order_item_id &&
         item.product_id === productId &&
         JSON.stringify(item.addons || []) === JSON.stringify(selectedAddons) &&
+        JSON.stringify(item.options || []) === JSON.stringify(selectedOptions || []) &&
         (item.variant_id || null) === (selectedVariant?.id || null) &&
         (item.special_instructions || '') === instructions
     );
@@ -701,8 +951,9 @@ function confirmAddToCart() {
             variant_name: selectedVariant?.name || null,
             variant_adj: selectedVariant ? Number(selectedVariant.price_adjustment || 0) : 0,
             addons: [...selectedAddons],
+            options: [...(selectedOptions || [])],
             discount: 0,
-            has_options: !!(selectedVariant || selectedAddons.length),
+            has_options: !!(selectedVariant || selectedAddons.length || (selectedOptions || []).length),
             special_instructions: instructions,
             loyalty_free: false,
         });
@@ -714,12 +965,14 @@ function confirmAddToCart() {
     if (typeof showToast === 'function') {
         const extras = [];
         if (selectedVariant) extras.push(selectedVariant.name);
+        if ((selectedOptions || []).length) extras.push(`${selectedOptions.length} option${selectedOptions.length > 1 ? 's' : ''}`);
         if (selectedAddons.length) extras.push(`${selectedAddons.length} add-on${selectedAddons.length > 1 ? 's' : ''}`);
         showToast('success', displayName + ' added' + (extras.join(', ') ? ` (${extras.join(', ')})` : ''));
     }
 
     pendingProduct = null;
     selectedAddons = [];
+    selectedOptions = [];
     selectedVariant = null;
     editingCartIndex = null;
     setTimeout(() => focusProductSearch(true), 30);
@@ -785,6 +1038,7 @@ function getCartItemsHTML() {
             <div class="flex-grow-1">
                 <div class="fw-medium">${item.name}${item.is_comp ? ' <span class="badge bg-dark" style="font-size:0.65rem;">COMP</span>' : ''}${item.loyalty_free ? ' <span class="badge bg-success" style="font-size:0.65rem;">FREE</span>' : ''}${locked && !item.loyalty_free && !item.is_comp ? ' <span class="badge bg-secondary" style="font-size:0.65rem;">On bill</span>' : (!locked && !item.loyalty_free && !item.is_comp ? ' <span class="badge bg-success" style="font-size:0.65rem;">New</span>' : '')}</div>
                 ${item.variant_name ? `<div class="text-muted small">${item.variant_name}</div>` : ''}
+                ${(item.options || []).length ? item.options.map(o => `<div class="text-muted small">${o.option_set_name || 'Option'}: ${o.name || o.option_name}</div>`).join('') : ''}
                 ${(item.addons || []).length ? item.addons.map(a => `<div class="text-muted small">+ ${a.name}</div>`).join('') : ''}
                 ${item.special_instructions ? `<div class="text-muted small"><i class="fas fa-comment-dots me-1"></i>${item.special_instructions}</div>` : ''}
                 ${(item.discount || 0) > 0 && !item.is_comp ? `<div class="text-danger small mt-1"><i class="fas fa-percent me-1"></i>Item discount −${currencySymbol} ${Number(item.discount).toFixed(2)}</div>` : ''}
@@ -1236,7 +1490,16 @@ function pushAnalogLedFromCart(payload) {
     AnalogLed.writeState(AnalogLed.fromCartPayload(payload));
 }
 
-function broadcastCart() {
+let broadcastCartTimer = null;
+function broadcastCart(immediate) {
+    if (immediate === true) {
+        clearTimeout(broadcastCartTimer);
+        return broadcastCartNow();
+    }
+    clearTimeout(broadcastCartTimer);
+    broadcastCartTimer = setTimeout(broadcastCartNow, 220);
+}
+function broadcastCartNow() {
     const hasItems = cart.length > 0;
     if (!hasItems) {
         return clearCustomerDisplay();
@@ -3686,7 +3949,7 @@ function startWaiterOrderAlertPolling() {
         try { pollWaiterOrderAlerts(); } catch (e) { console.warn(e); }
     };
     tick();
-    setInterval(tick, 3000);
+    smartPosInterval(tick, 3000);
 }
 
 function printKitchenTicketSmart(job, options = {}) {
@@ -5445,15 +5708,16 @@ function loadOpenBill(orderId, showToastMsg = true, allowPaid = false) {
                 name: item.product_name || item.name,
                 price: item.unit_price ?? item.price,
                 quantity: item.quantity,
-                variant_id: null,
-                variant_name: null,
+                variant_id: item.variant_id || null,
+                variant_name: item.variant_name || null,
                 addons: (item.addons || []).map(a => ({
                     id: a.id,
                     name: a.name || a.addon_name,
                     price: a.price,
+                    shared: a.shared !== false,
                 })),
                 discount: Number(item.discount_amount || item.discount || 0),
-                has_options: false,
+                has_options: !!(item.variant_id || (item.addons || []).length),
                 special_instructions: item.special_instructions || '',
                 loyalty_free: false,
                 is_comp: !!item.is_comp,
@@ -5767,7 +6031,7 @@ function showHeldOrders() {
                     <div class="card-body p-2">
                         <div class="d-flex justify-content-between">
                             <strong>${o.order_number || 'Order #' + o.id}</strong>
-                            <small class="text-muted">${new Date(o.created_at).toLocaleTimeString()}</small>
+                            <small class="text-muted">${window.BusinessClock ? BusinessClock.formatInstant(o.created_at, {hour:"2-digit", minute:"2-digit"}) : new Date(o.created_at).toLocaleTimeString()}</small>
                         </div>
                         <small>${o.items?.length || 0} items - ${o.order_type}</small>
                     </div>
@@ -7325,10 +7589,10 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
     refreshOpenBillsBadge();
-    setInterval(refreshPayBillsBadge, 15000);
-    setInterval(refreshOpenBillsBadge, 15000);
+    smartPosInterval(refreshPayBillsBadge, 15000);
+    smartPosInterval(refreshOpenBillsBadge, 15000);
     pollPendingKotPrints();
-    setInterval(pollPendingKotPrints, 8000);
+    smartPosInterval(pollPendingKotPrints, 8000);
     startWaiterOrderAlertPolling();
     if (isBakeryUi) {
         focusProductSearch(true);
@@ -7598,9 +7862,19 @@ try { startWaiterOrderAlertPolling(); } catch (_) {}
                             </div>
                         </div>
                     </div>
+                    <script>window.__POS_PRODUCT_EXTRAS = window.__POS_PRODUCT_EXTRAS || {};</script>
 
                     @foreach($categories as $category)
                         @foreach($category->products as $product)
+                        @php
+                            $hasVariants = $product->variants->isNotEmpty() || $product->has_variants;
+                            // Flags only — full modifiers/options load on click via /pos/products?id=
+                            $hasAddons = (int) ($product->pos_addons_count ?? 0) > 0
+                                || (int) ($product->pos_shared_addons_count ?? 0) > 0
+                                || (int) ($product->pos_addon_groups_count ?? 0) > 0
+                                || (int) ($product->pos_option_sets_count ?? 0) > 0
+                                || (bool) $product->has_addons;
+                        @endphp
                         <div class="product-item"
                              data-category="{{ $category->id }}"
                              data-subcategory="{{ $product->subcategory_id ?? '' }}"
@@ -7611,10 +7885,6 @@ try { startWaiterOrderAlertPolling(); } catch (_) {}
                              data-barcode="{{ strtolower($product->barcode ?? '') }}"
                              data-price="{{ $product->final_price }}"
                              data-partner-prices='@json($product->partnerPriceMap())'
-                             @php
-                                $hasVariants = $product->variants->isNotEmpty() || $product->has_variants;
-                                $hasAddons = $product->addons->isNotEmpty() || $product->has_addons;
-                             @endphp
                              data-has-variants="{{ $hasVariants ? '1' : '0' }}"
                              data-has-addons="{{ $hasAddons ? '1' : '0' }}">
                             <div class="product-card" onclick='handleProductClick({{ $product->id }}, @json($product->name), {{ $product->final_price }}, {{ $hasVariants ? "true" : "false" }}, {{ $hasAddons ? "true" : "false" }})'>

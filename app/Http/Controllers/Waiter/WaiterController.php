@@ -8,6 +8,7 @@ use App\Models\Customer;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\OrderItemAddon;
+use App\Models\OrderItemOption;
 use App\Models\Product;
 use App\Models\RestaurantTable;
 use App\Models\Setting;
@@ -59,6 +60,7 @@ class WaiterController extends Controller
         if ($tab === 'open') {
             // Floor open bills — not only ones already tagged to this waiter
             $orders = Order::with(['table:id,name', 'waiterRating', 'waiter:id,name', 'kitchenOrders'])
+                ->withCount(['items as items_count' => fn ($q) => $q->where('is_void', false)])
                 ->notVoid()
                 ->where('payment_status', 'unpaid')
                 ->latest('id')
@@ -66,6 +68,7 @@ class WaiterController extends Controller
                 ->get();
         } elseif ($tab === 'completed') {
             $orders = Order::with(['table:id,name', 'waiterRating'])
+                ->withCount(['items as items_count' => fn ($q) => $q->where('is_void', false)])
                 ->notVoid()
                 ->where('waiter_id', $waiterId)
                 ->where('payment_status', 'paid')
@@ -76,6 +79,7 @@ class WaiterController extends Controller
         } else {
             // Rate: my paid unrated + unassigned paid (claimable)
             $orders = Order::with(['table:id,name', 'waiterRating', 'customer:id,name,phone'])
+                ->withCount(['items as items_count' => fn ($q) => $q->where('is_void', false)])
                 ->notVoid()
                 ->where('payment_status', 'paid')
                 ->whereDoesntHave('waiterRating')
@@ -112,12 +116,14 @@ class WaiterController extends Controller
 
                 $bringBillOn = (bool) Setting::get('bring_bill_enabled', true);
                 // Independent of KOT confirmation — available after order/KOT exists (open unpaid bill)
+                $hasItems = (int) ($o->items_count ?? 0) > 0
+                    || ($o->relationLoaded('items') ? $o->items->where('is_void', false)->isNotEmpty() : false);
                 $canRequestBill = $bringBillOn
                     && $o->payment_status === 'unpaid'
                     && ! $o->bill_requested_at
                     && ($o->relationLoaded('kitchenOrders')
-                        ? ($o->kitchenOrders->where('status', '!=', 'cancelled')->isNotEmpty() || $o->items()->exists())
-                        : ($o->kitchenOrders()->where('status', '!=', 'cancelled')->exists() || $o->items()->exists()));
+                        ? ($o->kitchenOrders->where('status', '!=', 'cancelled')->isNotEmpty() || $hasItems)
+                        : ($o->kitchenOrders()->where('status', '!=', 'cancelled')->exists() || $hasItems));
 
                 return [
                     'id' => $o->id,
@@ -125,11 +131,15 @@ class WaiterController extends Controller
                     'table' => $o->table?->name,
                     'payment_status' => $o->payment_status,
                     'status' => $o->status,
-                    'items_count' => $o->items()->where('is_void', false)->count(),
-                    'completed_at' => $o->completed_at?->format('Y-m-d H:i') ?? $o->updated_at?->format('Y-m-d H:i'),
-                    'created_at' => $o->created_at?->format('Y-m-d H:i'),
+                    'items_count' => (int) ($o->items_count ?? $o->items()->where('is_void', false)->count()),
+                    'completed_at' => $o->completed_at
+                        ? Setting::formatDateTime($o->completed_at, 'Y-m-d H:i')
+                        : Setting::formatDateTime($o->updated_at, 'Y-m-d H:i'),
+                    'created_at' => Setting::formatDateTime($o->created_at, 'Y-m-d H:i'),
                     'bill_requested' => (bool) $o->bill_requested_at,
-                    'bill_requested_at' => $o->bill_requested_at?->format('H:i'),
+                    'bill_requested_at' => $o->bill_requested_at
+                        ? Setting::formatDateTime($o->bill_requested_at, 'H:i')
+                        : null,
                     'assigned_waiter' => $o->waiter?->name,
                     'is_mine' => (int) $o->waiter_id === (int) $waiterId,
                     'rating' => $o->waiterRating?->rating,
@@ -243,8 +253,8 @@ class WaiterController extends Controller
                     'quantity' => (float) $i->quantity,
                     'special_instructions' => $i->special_instructions,
                 ]),
-                'started_at' => $kot->started_at?->format('H:i'),
-                'ready_at' => $kot->completed_at?->format('H:i'),
+                'started_at' => $kot->started_at ? \App\Models\Setting::formatDateTime($kot->started_at, 'H:i') : null,
+                'ready_at' => $kot->completed_at ? \App\Models\Setting::formatDateTime($kot->completed_at, 'H:i') : null,
                 'elapsed' => $kot->created_at->diffForHumans(null, true),
             ];
         });
@@ -556,7 +566,16 @@ class WaiterController extends Controller
 
     public function tables()
     {
-        $tables = RestaurantTable::with(['floor', 'activeOrder'])
+        $pendingQrByTable = Order::awaitingQrApproval()
+            ->selectRaw('table_id, COUNT(*) as c')
+            ->whereNotNull('table_id')
+            ->groupBy('table_id')
+            ->pluck('c', 'table_id');
+
+        $tables = RestaurantTable::with([
+                'floor',
+                'activeOrder' => fn ($q) => $q->withCount(['items as items_count' => fn ($iq) => $iq->where('is_void', false)]),
+            ])
             ->active()
             ->get()
             ->map(fn ($t) => [
@@ -566,12 +585,12 @@ class WaiterController extends Controller
                 'status' => $t->activeOrder ? 'occupied' : 'available',
                 'capacity' => $t->capacity,
                 'qr_code' => $t->qr_code,
-                'pending_qr' => Order::awaitingQrApproval()->where('table_id', $t->id)->count(),
+                'pending_qr' => (int) ($pendingQrByTable[$t->id] ?? 0),
                 'active_order' => $t->activeOrder ? [
                     'id' => $t->activeOrder->id,
                     'order_number' => $t->activeOrder->order_number,
                     'total' => (float) $t->activeOrder->total_amount,
-                    'items_count' => $t->activeOrder->items()->where('is_void', false)->count(),
+                    'items_count' => (int) ($t->activeOrder->items_count ?? 0),
                     'guest_count' => $t->activeOrder->guest_count ? (int) $t->activeOrder->guest_count : null,
                     'started_at' => $t->activeOrder->created_at?->toIso8601String(),
                 ] : null,
@@ -591,6 +610,8 @@ class WaiterController extends Controller
                 'variants' => fn ($vq) => $vq->active()->orderBy('name'),
                 'sharedAddons' => fn ($aq) => $aq->active()->ordered(),
                 'addons' => fn ($aq) => $aq->active()->orderBy('name'),
+                'addonGroups' => fn ($gq) => $gq->active()->ordered()->with(['addons' => fn ($aq) => $aq->active()->ordered()]),
+                'optionSets' => fn ($oq) => $oq->active()->ordered()->with(['options' => fn ($opt) => $opt->active()->ordered()]),
             ])])
             ->get()
             ->map(fn ($c) => [
@@ -598,28 +619,62 @@ class WaiterController extends Controller
                 'name' => $c->name,
                 'type' => $c->type ?? 'kot',
                 'products' => $c->products->map(function ($p) {
+                    $basePrice = (float) ($p->final_price ?? $p->selling_price ?? $p->price ?? 0);
                     $variants = $p->variants->map(fn ($v) => [
                         'id' => $v->id,
                         'name' => $v->name,
                         'price_adjustment' => (float) $v->price_adjustment,
+                        'final_price' => $basePrice + (float) $v->price_adjustment,
                     ])->values();
-                    $shared = $p->sharedAddons;
-                    $addonsSource = $shared->isNotEmpty() ? $shared : $p->addons;
-                    $addons = $addonsSource->map(fn ($a) => [
+                    $resolvedAddons = $p->posAddons();
+                    $addons = $resolvedAddons->map(fn ($a) => [
                         'id' => $a->id,
                         'name' => $a->name,
                         'price' => (float) $a->price,
-                        'shared' => $shared->isNotEmpty(),
+                        'shared' => $a instanceof \App\Models\Addon,
+                    ])->values();
+                    $modifierSets = $p->posModifierSets()->map(fn ($set) => [
+                        'id' => $set['id'],
+                        'name' => $set['name'],
+                        'display_name' => $set['display_name'],
+                        'require_selection' => $set['require_selection'],
+                        'allow_multiple' => $set['allow_multiple'],
+                        'hide_on_receipt' => $set['hide_on_receipt'],
+                        'addons' => $set['addons']->map(fn ($a) => [
+                            'id' => $a->id,
+                            'name' => $a->name,
+                            'price' => (float) $a->price,
+                            'shared' => true,
+                            'group_id' => $set['id'],
+                            'is_preselected' => (bool) ($a->pivot->is_preselected ?? false),
+                            'hide_on_receipt' => $set['hide_on_receipt'],
+                        ])->values(),
+                    ])->values();
+                    $optionSets = $p->posOptionSets()->map(fn ($set) => [
+                        'id' => $set['id'],
+                        'name' => $set['name'],
+                        'display_name' => $set['display_name'],
+                        'type' => $set['type'],
+                        'require_selection' => $set['require_selection'],
+                        'options' => $set['options']->map(fn ($o) => [
+                            'id' => $o->id,
+                            'name' => $o->name,
+                            'color' => $o->color,
+                            'option_set_id' => $set['id'],
+                            'option_set_name' => $set['display_name'],
+                        ])->values(),
                     ])->values();
 
                     return [
                         'id' => $p->id,
                         'name' => $p->name,
-                        'price' => (float) ($p->final_price ?? $p->selling_price ?? $p->price ?? 0),
+                        'price' => $basePrice,
                         'has_variants' => $variants->isNotEmpty() || (bool) $p->has_variants,
-                        'has_addons' => $addons->isNotEmpty() || (bool) $p->has_addons,
+                        'has_addons' => $addons->isNotEmpty() || $optionSets->isNotEmpty() || (bool) $p->has_addons,
                         'variants' => $variants,
                         'addons' => $addons,
+                        'modifier_sets' => $modifierSets,
+                        'option_sets' => $optionSets,
                     ];
                 }),
             ])
@@ -799,6 +854,7 @@ class WaiterController extends Controller
             'items.*.price' => 'required|numeric',
             'items.*.name' => 'nullable|string',
             'items.*.addons' => 'nullable|array',
+            'items.*.options' => 'nullable|array',
             'items.*.special_instructions' => 'nullable|string',
             'items.*.variant_id' => 'nullable|integer',
             'items.*.variant_name' => 'nullable|string',
@@ -918,6 +974,21 @@ class WaiterController extends Controller
                         'addon_id' => $useShared ? $addonId : null,
                         'addon_name' => $addon['name'] ?? 'Addon',
                         'price' => $addon['price'] ?? 0,
+                        'hide_on_receipt' => ! empty($addon['hide_on_receipt']),
+                    ]);
+                }
+
+                foreach ($item['options'] ?? [] as $opt) {
+                    $optName = trim((string) ($opt['name'] ?? $opt['option_name'] ?? ''));
+                    if ($optName === '') {
+                        continue;
+                    }
+                    OrderItemOption::create([
+                        'order_item_id' => $orderItem->id,
+                        'option_set_id' => isset($opt['option_set_id']) ? (int) $opt['option_set_id'] : null,
+                        'option_id' => isset($opt['id']) ? (int) $opt['id'] : (isset($opt['option_id']) ? (int) $opt['option_id'] : null),
+                        'option_set_name' => trim((string) ($opt['option_set_name'] ?? $opt['set_name'] ?? 'Option')),
+                        'option_name' => $optName,
                     ]);
                 }
 
@@ -979,6 +1050,7 @@ class WaiterController extends Controller
             'items.*.price' => 'required_with:items|numeric',
             'items.*.name' => 'nullable|string',
             'items.*.addons' => 'nullable|array',
+            'items.*.options' => 'nullable|array',
             'items.*.special_instructions' => 'nullable|string',
             'items.*.variant_id' => 'nullable|integer',
             'items.*.variant_name' => 'nullable|string',
@@ -1131,6 +1203,21 @@ class WaiterController extends Controller
                         'addon_id' => $useShared ? $addonId : null,
                         'addon_name' => $addon['name'] ?? 'Addon',
                         'price' => $addon['price'] ?? 0,
+                        'hide_on_receipt' => ! empty($addon['hide_on_receipt']),
+                    ]);
+                }
+
+                foreach ($item['options'] ?? [] as $opt) {
+                    $optName = trim((string) ($opt['name'] ?? $opt['option_name'] ?? ''));
+                    if ($optName === '') {
+                        continue;
+                    }
+                    OrderItemOption::create([
+                        'order_item_id' => $orderItem->id,
+                        'option_set_id' => isset($opt['option_set_id']) ? (int) $opt['option_set_id'] : null,
+                        'option_id' => isset($opt['id']) ? (int) $opt['id'] : (isset($opt['option_id']) ? (int) $opt['option_id'] : null),
+                        'option_set_name' => trim((string) ($opt['option_set_name'] ?? $opt['set_name'] ?? 'Option')),
+                        'option_name' => $optName,
                     ]);
                 }
 

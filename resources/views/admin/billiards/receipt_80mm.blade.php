@@ -186,7 +186,7 @@
 
 <div class="dline"></div>
 <div class="center bold">{{ $footer }}</div>
-<div class="center muted">Printed {{ now()->format('d/m/Y H:i') }}</div>
+<div class="center muted">Printed {{ \App\Models\Setting::formatDateTime(now(), 'd/m/Y H:i') }}</div>
 @include('partials.print-footer-80mm')
 
 @if(request()->boolean('autoprint'))

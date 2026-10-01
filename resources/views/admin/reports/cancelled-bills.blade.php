@@ -79,7 +79,7 @@
                             $kind = $order->void_type ?: ($order->is_void ? 'void' : 'cancel');
                         @endphp
                         <tr>
-                            <td class="text-nowrap text-muted small">{{ optional($order->updated_at)->format('Y-m-d H:i') }}</td>
+                            <td class="text-nowrap text-muted small">{{ \App\Models\Setting::formatDateTime($order->updated_at, 'Y-m-d H:i') }}</td>
                             <td>
                                 <strong>{{ $order->order_number }}</strong>
                                 <div class="small text-muted text-capitalize">{{ str_replace('_', ' ', $order->order_type) }}</div>

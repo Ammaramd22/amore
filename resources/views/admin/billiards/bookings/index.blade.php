@@ -87,7 +87,7 @@
                         </td>
                         <td>
                             <div>{{ $b->scheduled_start?->format('d M Y') }}</div>
-                            <small class="text-muted">{{ $b->scheduled_start?->format('H:i') }}–{{ $b->scheduled_end?->format('H:i') }} · {{ rtrim(rtrim(number_format((float)$b->hours,2),'0'),'.') }}h</small>
+                            <small class="text-muted">{{ \App\Models\Setting::formatDateTime($b->scheduled_start, 'H:i') }}–{{ \App\Models\Setting::formatDateTime($b->scheduled_end, 'H:i') }} · {{ rtrim(rtrim(number_format((float)$b->hours,2),'0'),'.') }}h</small>
                         </td>
                         <td class="fw-semibold">{{ $currency }} {{ number_format((float)$b->amount, 2) }}</td>
                         <td><span class="badge rounded-pill text-bg-{{ $b->statusBadgeClass() }}">{{ $b->statusLabel() }}</span></td>

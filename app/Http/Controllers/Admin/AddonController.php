@@ -55,7 +55,7 @@ class AddonController extends Controller
         $addon->products()->sync($productIds);
         $this->refreshProductAddonFlags($productIds);
 
-        return redirect()->route('addons.index')->with('success', 'Add-on created.');
+        return redirect()->route('addons.index')->with('success', 'Modifier created.');
     }
 
     public function show(Addon $addon)
@@ -94,7 +94,7 @@ class AddonController extends Controller
         $addon->products()->sync($productIds);
         $this->refreshProductAddonFlags(array_unique(array_merge($previousIds, $productIds)));
 
-        return redirect()->route('addons.index')->with('success', 'Add-on updated.');
+        return redirect()->route('addons.index')->with('success', 'Modifier updated.');
     }
 
     public function destroy(Addon $addon)
@@ -104,7 +104,7 @@ class AddonController extends Controller
         $addon->delete();
         $this->refreshProductAddonFlags($productIds);
 
-        return redirect()->route('addons.index')->with('success', 'Add-on deleted.');
+        return redirect()->route('addons.index')->with('success', 'Modifier deleted.');
     }
 
     /** @param  array<int>  $productIds */
@@ -115,9 +115,7 @@ class AddonController extends Controller
             if (! $product) {
                 continue;
             }
-            $product->update([
-                'has_addons' => $product->sharedAddons()->exists() || $product->addons()->exists(),
-            ]);
+            $product->refreshHasAddonsFlag();
         }
     }
 }

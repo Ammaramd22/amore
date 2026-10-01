@@ -59,6 +59,8 @@ class ProductController extends Controller
         $defaultBranchIds = $branches->pluck('id')->all();
         $suppliers = Supplier::active()->orderBy('name')->get();
         $catalogAddons = \App\Models\Addon::ordered()->get();
+        $catalogAddonGroups = \App\Models\AddonGroup::ordered()->withCount('addons')->get();
+        $catalogOptionSets = \App\Models\OptionSet::ordered()->withCount('options')->get();
 
         return view('admin.products.create', compact(
             'categories',
@@ -69,7 +71,9 @@ class ProductController extends Controller
             'multiBranch',
             'defaultBranchIds',
             'suppliers',
-            'catalogAddons'
+            'catalogAddons',
+            'catalogAddonGroups',
+            'catalogOptionSets'
         ));
     }
 
@@ -185,13 +189,18 @@ class ProductController extends Controller
             }
         }
         $product->sharedAddons()->sync($sharedIds->unique()->values()->all());
-        $addonCount = max($addonCount, $sharedIds->count());
+        $groupIds = collect($request->input('addon_group_ids', []))->filter()->map(fn ($id) => (int) $id)->unique()->values()->all();
+        $product->addonGroups()->sync($groupIds);
+        $optionSetIds = collect($request->input('option_set_ids', []))->filter()->map(fn ($id) => (int) $id)->unique()->values()->all();
+        $product->optionSets()->sync($optionSetIds);
+        $addonCount = max($addonCount, $sharedIds->count(), count($groupIds));
 
-        if ($variantCount || $addonCount) {
+        if ($variantCount || $addonCount || count($optionSetIds)) {
             $product->update([
                 'has_variants' => $variantCount > 0,
                 'has_addons' => $addonCount > 0,
             ]);
+            $product->refreshHasAddonsFlag();
         }
 
         if ($request->ajax() || $request->wantsJson()) {
@@ -208,7 +217,7 @@ class ProductController extends Controller
 
     public function edit(Product $product)
     {
-        $product->load('variants', 'addons', 'sharedAddons', 'partnerPrices', 'branches', 'suppliers');
+        $product->load('variants', 'addons', 'sharedAddons', 'addonGroups', 'optionSets', 'partnerPrices', 'branches', 'suppliers');
         $categories = Category::active()->get();
         $subcategories = Subcategory::where('category_id', $product->category_id)->active()->get();
         $deliveryPartners = DeliveryPartner::active()->orderBy('name')->get();
@@ -221,6 +230,10 @@ class ProductController extends Controller
         $defaultSupplierIds = $product->suppliers->pluck('id')->all();
         $catalogAddons = \App\Models\Addon::ordered()->get();
         $selectedSharedAddonIds = $product->sharedAddons->pluck('id')->all();
+        $catalogAddonGroups = \App\Models\AddonGroup::ordered()->withCount('addons')->get();
+        $selectedAddonGroupIds = $product->addonGroups->pluck('id')->all();
+        $catalogOptionSets = \App\Models\OptionSet::ordered()->withCount('options')->get();
+        $selectedOptionSetIds = $product->optionSets->pluck('id')->all();
 
         return view('admin.products.edit', compact(
             'product',
@@ -233,7 +246,11 @@ class ProductController extends Controller
             'suppliers',
             'defaultSupplierIds',
             'catalogAddons',
-            'selectedSharedAddonIds'
+            'selectedSharedAddonIds',
+            'catalogAddonGroups',
+            'selectedAddonGroupIds',
+            'catalogOptionSets',
+            'selectedOptionSetIds'
         ));
     }
 
@@ -362,11 +379,15 @@ class ProductController extends Controller
         }
         $product->addons()->whereNotIn('id', $keepAddonIds)->delete();
         $product->sharedAddons()->sync($sharedIds->unique()->values()->all());
+        $groupIds = collect($request->input('addon_group_ids', []))->filter()->map(fn ($id) => (int) $id)->unique()->values()->all();
+        $product->addonGroups()->sync($groupIds);
+        $optionSetIds = collect($request->input('option_set_ids', []))->filter()->map(fn ($id) => (int) $id)->unique()->values()->all();
+        $product->optionSets()->sync($optionSetIds);
 
         $product->update([
             'has_variants' => $product->variants()->exists(),
-            'has_addons' => $product->sharedAddons()->exists() || $product->addons()->exists(),
         ]);
+        $product->refreshHasAddonsFlag();
 
         return redirect()->route('products.index')->with('success', 'Product updated.');
     }

@@ -102,6 +102,28 @@
             color: #1c1917 !important;
             transform: translateY(-1px);
         }
+        .nav-chip.clock {
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 0;
+            padding: 0.35rem 0.75rem;
+            line-height: 1.15;
+            cursor: default;
+            pointer-events: none;
+            min-width: 7.5rem;
+        }
+        .nav-chip.clock .nav-clock-time {
+            font-size: 0.82rem;
+            font-weight: 750;
+            color: #1c1917;
+            font-variant-numeric: tabular-nums;
+        }
+        .nav-chip.clock .nav-clock-date {
+            font-size: 0.65rem;
+            font-weight: 600;
+            color: #78716c;
+            letter-spacing: 0.01em;
+        }
         .nav-chip.primary {
             background: linear-gradient(135deg, #f59e0b, #ea580c);
             border-color: transparent;
@@ -678,6 +700,26 @@
         .pagination .page-link { border: none; padding: 10px 16px; color: #64748b; border-radius: 8px; margin: 0 2px; }
         .pagination .page-item.active .page-link { background: linear-gradient(135deg, #f59e0b, #ea580c); color: #fff; }
         .page-item.active .page-link { background: linear-gradient(135deg, #f59e0b, #ea580c) !important; border-color: #f59e0b; }
+        /* Safety: unconstrained pagination SVGs (Tailwind default) must never fill the page */
+        .pagination svg,
+        nav[role="navigation"] svg,
+        .card-footer svg {
+            width: 1.15rem !important;
+            height: 1.15rem !important;
+            max-width: 1.25rem !important;
+            max-height: 1.25rem !important;
+            flex-shrink: 0;
+            display: inline-block;
+            vertical-align: middle;
+        }
+        .table img,
+        .bulk-table img {
+            max-width: 48px;
+            max-height: 48px;
+            width: 40px;
+            height: 40px;
+            object-fit: cover;
+        }
         .pos-btn { min-height: 80px; font-size: 1.1rem; }
         .touch-btn { min-height: 60px; font-size: 1.2rem; }
         .card-table { cursor: pointer; transition: all 0.2s; }
@@ -729,6 +771,7 @@
             .main-header .navbar-nav .nav-link { padding: 8px 10px; font-size: 0.85rem; }
         }
     </style>
+    @include('partials.business-clock')
 </head>
 <body class="hold-transition sidebar-mini">
 <div class="wrapper">
@@ -750,6 +793,10 @@
         <ul class="navbar-nav ms-auto align-items-center">
             <li class="nav-item">
                 <div class="nav-quick">
+                    <div class="nav-chip clock d-none d-md-flex" id="adminBusinessClock" title="{{ \App\Models\Setting::timezone() }}">
+                        <span class="nav-clock-time" data-clock-time>--:--</span>
+                        <span class="nav-clock-date" data-clock-date>—</span>
+                    </div>
                     @can('pos.access')
                     <a class="nav-chip primary d-none d-sm-inline-flex" href="{{ route('pos.index') }}">
                         <i class="fas fa-cash-register"></i> POS
@@ -926,11 +973,19 @@
                         </a>
                     </li>
                     @endcan
+                    @can('option-sets.view')
+                    <li class="nav-item">
+                        <a href="{{ route('option-sets.index') }}" class="nav-link {{ request()->routeIs('option-sets.*') ? 'active' : '' }}">
+                            <i class="nav-icon fas fa-list-ul"></i>
+                            <p>Option Sets</p>
+                        </a>
+                    </li>
+                    @endcan
                     @can('addons.view')
                     <li class="nav-item">
-                        <a href="{{ route('addons.index') }}" class="nav-link {{ request()->routeIs('addons.*') ? 'active' : '' }}">
-                            <i class="nav-icon fas fa-plus-circle"></i>
-                            <p>Add-ons</p>
+                        <a href="{{ route('addon-groups.index') }}" class="nav-link {{ request()->routeIs('addon-groups.*') ? 'active' : '' }}">
+                            <i class="nav-icon fas fa-layer-group"></i>
+                            <p>Modifiers</p>
                         </a>
                     </li>
                     @endcan
@@ -1494,7 +1549,10 @@ function initBulkTables() {
             const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
             const a = document.createElement('a');
             a.href = URL.createObjectURL(blob);
-            a.download = `${toolbar.dataset.export || 'export'}-${new Date().toISOString().slice(0, 10)}.csv`;
+            const bizDate = (window.BusinessClock && BusinessClock.format)
+                ? (() => { try { return BusinessClock.now().toLocaleDateString('en-CA', { timeZone: BusinessClock.timezone() }); } catch (e) { return new Date().toISOString().slice(0, 10); } })()
+                : new Date().toISOString().slice(0, 10);
+            a.download = `${toolbar.dataset.export || 'export'}-${bizDate}.csv`;
             a.click();
             URL.revokeObjectURL(a.href);
             showToast('success', `Exported ${rows.length} row(s)`);
@@ -1765,6 +1823,12 @@ $(document).ready(function() {
 });
 </script>
 @stack('scripts')
+<script>
+(function () {
+    if (!window.BusinessClock) return;
+    BusinessClock.bind('#adminBusinessClock', { mode: 'split', seconds: true });
+})();
+</script>
 <script src="{{ asset('js/avenque-tour.js') }}?v=1"></script>
 @include('partials.avenque-ai-chatbot')
 </body>

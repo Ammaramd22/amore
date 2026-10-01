@@ -12,11 +12,12 @@ class OrderItemAddon extends Model
     protected $table = 'order_item_addons';
 
     protected $fillable = [
-        'order_item_id', 'product_addon_id', 'addon_id', 'addon_name', 'price',
+        'order_item_id', 'product_addon_id', 'addon_id', 'addon_name', 'price', 'hide_on_receipt',
     ];
 
     protected $casts = [
         'price' => 'decimal:2',
+        'hide_on_receipt' => 'boolean',
     ];
 
     public function orderItem()

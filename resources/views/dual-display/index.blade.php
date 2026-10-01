@@ -570,6 +570,7 @@
             .summary-row { grid-template-columns: 1fr; }
         }
     </style>
+    @include('partials.business-clock')
 </head>
 <body>
 @php
@@ -741,7 +742,9 @@
     }
 
     function updateClock() {
-        const t = new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+        const t = window.BusinessClock
+            ? BusinessClock.formatTime(false)
+            : new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
         document.querySelectorAll('.clock').forEach(el => el.textContent = t);
     }
     setInterval(updateClock, 1000);

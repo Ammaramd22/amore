@@ -321,6 +321,7 @@
             padding: 0.35rem 0.75rem; font-size: 0.8rem; font-weight: 600; cursor: pointer;
         }
     </style>
+    @include('partials.business-clock')
 </head>
 <body>
     <!-- ===== HEADER ===== -->
@@ -470,10 +471,11 @@
     </audio>
 
     <script>
-        // ===== CLOCK =====
+        // ===== CLOCK (business timezone) =====
         function updateClock() {
-            const now = new Date();
-            const time = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
+            const time = window.BusinessClock
+                ? BusinessClock.formatTime(false)
+                : new Date().toLocaleTimeString('en-US', { hour12: true, hour: '2-digit', minute: '2-digit' });
             document.querySelectorAll('.clock').forEach(el => el.textContent = time);
         }
         setInterval(updateClock, 1000);

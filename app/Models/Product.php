@@ -106,15 +106,171 @@ class Product extends Model
         return $this->belongsToMany(Addon::class, 'addon_product')->withTimestamps();
     }
 
-    /** Active add-ons for POS: shared catalog first, else legacy rows. */
+    /** Modifier / add-on sets assigned to this product. */
+    public function addonGroups()
+    {
+        return $this->belongsToMany(AddonGroup::class, 'addon_group_product')->withTimestamps();
+    }
+
+    /** Preference option sets (Milk Type, Sugar Level, etc.) — not priced modifiers. */
+    public function optionSets()
+    {
+        return $this->belongsToMany(OptionSet::class, 'option_set_product')->withTimestamps();
+    }
+
+    /**
+     * Active option sets with active options for POS.
+     */
+    public function posOptionSets()
+    {
+        $sets = $this->relationLoaded('optionSets')
+            ? $this->optionSets->where('is_active', true)->sortBy([['display_order', 'asc'], ['name', 'asc']])->values()
+            : $this->optionSets()->active()->ordered()->with(['options' => fn ($q) => $q->active()->ordered()])->get();
+
+        return $sets->map(function ($set) {
+            $options = $set->relationLoaded('options')
+                ? $set->options->where('is_active', true)->values()
+                : $set->options()->active()->ordered()->get();
+
+            return [
+                'id' => $set->id,
+                'name' => $set->name,
+                'display_name' => $set->displayLabel(),
+                'type' => $set->type ?: 'text',
+                'require_selection' => (bool) $set->require_selection,
+                'options' => $options,
+            ];
+        })->filter(fn ($set) => $set['options']->isNotEmpty())->values();
+    }
+
+    /**
+     * Active modifiers for POS: direct shared add-ons + add-ons from assigned sets.
+     * Falls back to legacy per-product rows when neither is present.
+     */
     public function posAddons()
     {
-        $shared = $this->sharedAddons()->active()->ordered()->get();
-        if ($shared->isNotEmpty()) {
-            return $shared;
+        $direct = $this->relationLoaded('sharedAddons')
+            ? $this->sharedAddons->where('is_active', true)->sortBy([['display_order', 'asc'], ['name', 'asc']])->values()
+            : $this->sharedAddons()->active()->ordered()->get();
+
+        $fromGroups = collect();
+        if ($this->relationLoaded('addonGroups')) {
+            $fromGroups = $this->addonGroups
+                ->filter(fn ($g) => (bool) ($g->is_active ?? true))
+                ->flatMap(function ($group) {
+                    if ($group->relationLoaded('addons')) {
+                        return $group->addons->filter(function ($addon) {
+                            return (bool) ($addon->is_active ?? true) && (bool) ($addon->pivot->is_available ?? true);
+                        });
+                    }
+
+                    return $group->addons()->where('addons.is_active', true)->get();
+                });
+        } else {
+            $fromGroups = $this->addonGroups()
+                ->where('addon_groups.is_active', true)
+                ->with(['addons' => fn ($q) => $q->where('addons.is_active', true)->ordered()])
+                ->get()
+                ->flatMap(fn ($group) => $group->addons);
+        }
+
+        $merged = $direct->concat($fromGroups)->unique('id')->values();
+        if ($merged->isNotEmpty()) {
+            return $merged;
+        }
+
+        if ($this->relationLoaded('addons')) {
+            return $this->addons->where('is_active', true)->sortBy('name')->values();
         }
 
         return $this->addons()->active()->orderBy('name')->get();
+    }
+
+    /** Active modifier sets with available modifiers (for grouped POS UI). */
+    public function posModifierSets(?int $branchId = null)
+    {
+        // Product-assigned sets always show in POS. Assignment is the source of truth.
+        $query = $this->relationLoaded('addonGroups')
+            ? null
+            : $this->addonGroups()->active()->ordered()->forBranch($branchId)
+                ->with(['addons' => fn ($q) => $q->orderBy('addons.name'), 'branches:id']);
+
+        $groups = $query
+            ? $query->get()
+            : $this->addonGroups
+                ->filter(fn ($g) => (bool) ($g->is_active ?? true))
+                ->sortBy([['display_order', 'asc'], ['name', 'asc']])
+                ->values();
+
+        if ($branchId && \App\Services\BranchService::enabled()) {
+            $groups = $groups->filter(function ($group) use ($branchId) {
+                if (! $group->relationLoaded('branches')) {
+                    return true;
+                }
+
+                return $group->branches->isEmpty() || $group->branches->contains('id', $branchId);
+            })->values();
+        }
+
+        return $groups->map(function ($group) {
+            try {
+                $addons = $group->relationLoaded('addons')
+                    ? $group->addons
+                    : $group->addons()->orderBy('addons.name')->get();
+            } catch (\Throwable $e) {
+                // Fallback if pivot/schema mismatch — raw join without optional pivot cols
+                $addons = Addon::query()
+                    ->join('addon_group_addon', 'addons.id', '=', 'addon_group_addon.addon_id')
+                    ->where('addon_group_addon.addon_group_id', $group->id)
+                    ->select('addons.*')
+                    ->orderBy('addons.name')
+                    ->get();
+            }
+
+            // For product-assigned sets, show linked modifiers unless pivot explicitly unavailable.
+            // Do NOT drop them just because addons.is_active was toggled elsewhere.
+            $addons = $addons->filter(function ($addon) {
+                $available = $addon->pivot->is_available ?? true;
+
+                return (bool) $available;
+            })->values();
+
+            // Last resort: if filter removed everything but group has rows, show all
+            if ($addons->isEmpty()) {
+                try {
+                    $addons = $group->relationLoaded('addons')
+                        ? $group->addons->values()
+                        : $group->addons()->orderBy('addons.name')->get();
+                } catch (\Throwable $e) {
+                    $addons = collect();
+                }
+            }
+
+            return [
+                'id' => $group->id,
+                'name' => $group->name,
+                'display_name' => $group->displayLabel(),
+                'selection_type' => $group->selection_type ?: 'list',
+                'require_selection' => (bool) ($group->require_selection ?? false),
+                'allow_multiple' => (bool) ($group->allow_multiple ?? true),
+                'hide_on_receipt' => (bool) ($group->hide_on_receipt ?? false),
+                'addons' => $addons,
+            ];
+        })->filter(fn ($set) => $set['addons']->isNotEmpty())->values();
+    }
+
+    public function refreshHasAddonsFlag(): void
+    {
+        // Any assigned active modifier set counts — even if child modifiers were marked inactive.
+        $hasFromSets = $this->addonGroups()
+            ->where('addon_groups.is_active', true)
+            ->exists();
+
+        $this->update([
+            'has_addons' => $this->sharedAddons()->exists()
+                || $this->addons()->exists()
+                || $hasFromSets,
+        ]);
     }
 
     public function partnerPrices()

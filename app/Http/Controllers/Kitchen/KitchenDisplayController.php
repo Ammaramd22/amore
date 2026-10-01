@@ -45,7 +45,7 @@ class KitchenDisplayController extends Controller
 
         $kitchenId = $request->get('kitchen_id');
 
-        $query = KitchenOrder::with(['order.table', 'order.waiter', 'items.orderItem.addons'])
+        $query = KitchenOrder::with(['order.table', 'order.waiter', 'items.orderItem.addons', 'items.orderItem.options'])
             ->whereIn('status', ['pending', 'preparing'])
             ->onLiveBoard()
             ->orderByDesc('created_at');
@@ -69,6 +69,11 @@ class KitchenDisplayController extends Controller
                         'name' => $a->addon_name,
                         'price' => (float) $a->price,
                     ])->values()->all();
+                    $options = ($item->orderItem?->options ?? collect())->map(fn ($o) => [
+                        'name' => trim(($o->option_set_name ? $o->option_set_name.': ' : '').($o->option_name ?? '')),
+                        'option_set_name' => $o->option_set_name,
+                        'option_name' => $o->option_name,
+                    ])->filter(fn ($o) => $o['name'] !== '')->values()->all();
 
                     return [
                         'id' => $item->id,
@@ -76,10 +81,11 @@ class KitchenDisplayController extends Controller
                         'quantity' => $item->quantity,
                         'instructions' => $item->special_instructions,
                         'addons' => $addons,
+                        'options' => $options,
                         'status' => $item->status,
                     ];
                 }),
-                'created_at' => $kot->created_at->format('H:i:s'),
+                'created_at' => \App\Models\Setting::formatDateTime($kot->created_at, 'H:i:s'),
                 'elapsed_minutes' => (int) max(0, round($kot->created_at->diffInMinutes(now()))),
             ];
         });

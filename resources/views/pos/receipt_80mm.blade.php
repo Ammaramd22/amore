@@ -139,10 +139,25 @@
             $qty = (float) $item->quantity;
             $unitDisplay = $qty > 0 ? ($lineGross / $qty) : (float) $item->unit_price;
             $qtyLabel = rtrim(rtrim(number_format($qty, 3, '.', ''), '0'), '.') ?: '0';
+            $itemAddons = $item->relationLoaded('addons') ? $item->addons : collect();
         @endphp
         <tr class="receipt-item-row">
             <td colspan="3">{{ $item->product_name }}{{ $isComp ? ' [COMP]' : ($isFree ? ' [FREE]' : '') }}</td>
         </tr>
+        @foreach($itemAddons as $addon)
+        @if(empty($addon->hide_on_receipt))
+        <tr class="receipt-item-disc">
+            <td colspan="2">+ {{ $addon->addon_name }}</td>
+            <td class="right">{{ (float) $addon->price > 0 ? '+'.number_format((float) $addon->price, 2) : '' }}</td>
+        </tr>
+        @endif
+        @endforeach
+        @php $itemOptions = $item->relationLoaded('options') ? $item->options : collect(); @endphp
+        @foreach($itemOptions as $opt)
+        <tr class="receipt-item-disc">
+            <td colspan="3">{{ $opt->option_set_name }}: {{ $opt->option_name }}</td>
+        </tr>
+        @endforeach
         <tr class="receipt-item-disc">
             <td>{{ ($isFree || $isComp) ? ($isComp ? 'COMP' : 'FREE') : (number_format($unitDisplay, 2).' × '.$qtyLabel) }}</td>
             <td class="right">{{ ($itemDisc > 0 && ! $isFree && ! $isComp) ? number_format($itemDisc, 2) : '—' }}</td>
@@ -162,12 +177,27 @@
             $lineNet = (float) $item->total_price;
             $qty = (float) $item->quantity;
             $qtyLabel = rtrim(rtrim(number_format($qty, 3, '.', ''), '0'), '.') ?: '0';
+            $itemAddons = $item->relationLoaded('addons') ? $item->addons : collect();
         @endphp
         <tr class="receipt-item-row">
             <td>{{ $item->product_name }}{{ $isComp ? ' [COMP]' : ($isFree ? ' [FREE]' : '') }}</td>
             <td class="right">{{ $qtyLabel }}</td>
             <td class="right">{{ ($isFree || $isComp) ? ($isComp ? 'COMP' : 'FREE') : number_format($lineNet, 2) }}</td>
         </tr>
+        @foreach($itemAddons as $addon)
+        @if(empty($addon->hide_on_receipt))
+        <tr class="receipt-item-disc">
+            <td colspan="2">+ {{ $addon->addon_name }}</td>
+            <td class="right">{{ (float) $addon->price > 0 ? '+'.number_format((float) $addon->price, 2) : '' }}</td>
+        </tr>
+        @endif
+        @endforeach
+        @php $itemOptions = $item->relationLoaded('options') ? $item->options : collect(); @endphp
+        @foreach($itemOptions as $opt)
+        <tr class="receipt-item-disc">
+            <td colspan="3">{{ $opt->option_set_name }}: {{ $opt->option_name }}</td>
+        </tr>
+        @endforeach
         @endforeach
         @endif
     </table>

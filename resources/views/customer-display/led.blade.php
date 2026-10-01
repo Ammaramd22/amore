@@ -232,6 +232,7 @@
             .led-label { font-size: 0.85rem; }
         }
     </style>
+    @include('partials.business-clock')
 </head>
 <body>
     <div class="toolbar">
@@ -288,10 +289,14 @@
         }
 
         function tickClock() {
-            const d = new Date();
-            const hh = String(d.getHours()).padStart(2, '0');
-            const mm = String(d.getMinutes()).padStart(2, '0');
-            document.getElementById('clock').textContent = hh + ':' + mm;
+            if (window.BusinessClock) {
+                const el = document.getElementById('clock');
+                if (el) el.textContent = BusinessClock.formatTime(true);
+                return;
+            }
+            const now = new Date();
+            const el = document.getElementById('clock');
+            if (el) el.textContent = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
         }
 
         function showIdle(message) {

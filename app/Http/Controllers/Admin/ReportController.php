@@ -459,7 +459,7 @@ class ReportController extends Controller
                     'waiter' => $order->waiter?->name,
                     'total' => (float) $order->total_amount,
                     'paid' => (float) $order->paid_amount,
-                    'created_at' => $order->created_at?->format('Y-m-d H:i'),
+                    'created_at' => \App\Models\Setting::formatDateTime($order->created_at, 'Y-m-d H:i'),
                     'lines' => $lines,
                 ];
             });

@@ -160,10 +160,13 @@ class PosController extends Controller
                         'variants' => fn ($vq) => $vq->active()->select([
                             'id', 'product_id', 'name', 'price_adjustment', 'is_active',
                         ]),
-                        'addons' => fn ($aq) => $aq->active()->select([
-                            'id', 'product_id', 'name', 'price', 'is_active',
-                        ]),
                         'partnerPrices:id,product_id,delivery_partner_id,price',
+                    ])
+                    ->withCount([
+                        'addons as pos_addons_count' => fn ($aq) => $aq->active(),
+                        'sharedAddons as pos_shared_addons_count' => fn ($aq) => $aq->active(),
+                        'addonGroups as pos_addon_groups_count' => fn ($gq) => $gq->active(),
+                        'optionSets as pos_option_sets_count' => fn ($oq) => $oq->active(),
                     ]);
             }])
             ->with(['subcategories' => fn ($q) => $q->active()->orderBy('display_order')->orderBy('name')])
@@ -203,6 +206,7 @@ class PosController extends Controller
 
         $customers = Customer::active()
             ->orderBy('name')
+            ->limit(300)
             ->get(['id', 'name', 'phone', 'address', 'is_active', 'loyalty_joined', 'loyalty_stamps', 'loyalty_free_drinks']);
 
         $heldOrders = HeldOrder::with(['table:id,name', 'customer:id,name,phone'])

@@ -14,7 +14,7 @@ class NetworkPrinterService
      */
     public function printKitchenOrder(KitchenOrder $kitchenOrder): array
     {
-        $kitchenOrder->loadMissing(['order.table', 'order.waiter', 'order.cashier', 'items.orderItem.addons', 'kitchen']);
+        $kitchenOrder->loadMissing(['order.table', 'order.waiter', 'order.cashier', 'items.orderItem.addons', 'items.orderItem.options', 'kitchen']);
 
         $kitchen = $kitchenOrder->kitchen;
         $resolved = \App\Models\Kitchen::resolvePrinterForKitchenOrder($kitchen, (string) $kitchenOrder->type);
@@ -86,7 +86,7 @@ class NetworkPrinterService
     /** Raw ESC/POS bytes for a kitchen ticket (Print Bridge). */
     public function escPosKitchenPayload(KitchenOrder $kitchenOrder): string
     {
-        $kitchenOrder->loadMissing(['order.table', 'order.waiter', 'order.cashier', 'items.orderItem.addons', 'kitchen']);
+        $kitchenOrder->loadMissing(['order.table', 'order.waiter', 'order.cashier', 'items.orderItem.addons', 'items.orderItem.options', 'kitchen']);
 
         return $this->buildEscPosTicket($kitchenOrder);
     }
@@ -246,6 +246,15 @@ class NetworkPrinterService
             $addons = $item->relationLoaded('orderItem')
                 ? ($item->orderItem?->addons ?? collect())
                 : ($item->orderItem()?->with('addons')->first()?->addons ?? collect());
+            $options = $item->relationLoaded('orderItem')
+                ? ($item->orderItem?->options ?? collect())
+                : collect();
+            foreach ($options as $opt) {
+                $optLine = (string) ($opt->option_set_name ?? 'Option').': '.(string) ($opt->option_name ?? '');
+                foreach ($this->wrapLines($optLine, $width - 2) as $aLine) {
+                    $out .= '  '.$aLine."\n";
+                }
+            }
             foreach ($addons as $addon) {
                 $addonLine = '+ '.(string) ($addon->addon_name ?? 'Addon');
                 foreach ($this->wrapLines($addonLine, $width - 2) as $aLine) {
@@ -769,7 +778,7 @@ class NetworkPrinterService
                 str_repeat('-', 32),
                 $this->center($name, 32),
                 $this->center($ip.':'.$port, 32),
-                $this->center(date('Y-m-d H:i:s'), 32),
+                $this->center(Setting::formatDateTime(now(), 'Y-m-d H:i:s'), 32),
                 str_repeat('-', 32),
                 $this->center('OK — use this IP in Settings', 32),
                 '',
@@ -886,7 +895,7 @@ class NetworkPrinterService
 
     private function buildEscPosReceipt(\App\Models\Order $order): string
     {
-        $order->loadMissing(['branch', 'items', 'payments.creator', 'cashier', 'waiter', 'table', 'customer', 'deliveryPartner']);
+        $order->loadMissing(['branch', 'items.addons', 'payments.creator', 'cashier', 'waiter', 'table', 'customer', 'deliveryPartner']);
         $invoice = \App\Services\BranchService::invoiceSettings($order->branch ?? \App\Services\BranchService::current());
 
         $company = trim((string) ($invoice['company_name'] ?? Setting::get('company_name', 'QRPOS')));
@@ -998,6 +1007,15 @@ class NetworkPrinterService
                 $discLabel = ($itemDisc > 0 && ! $isFree) ? number_format($itemDisc, 2) : '-';
                 // Name on first line; unit×qty / disc / amount under
                 $out .= $name."\n";
+                foreach ($item->addons ?? [] as $addon) {
+                    if (! empty($addon->hide_on_receipt)) {
+                        continue;
+                    }
+                    $addonName = $this->safeEscPosText('+ '.(string) ($addon->addon_name ?? 'Addon'));
+                    $addonPrice = (float) ($addon->price ?? 0);
+                    $addonAmt = $addonPrice > 0 ? ('+'.number_format($addonPrice, 2)) : '';
+                    $out .= $this->cols([$addonName, '', $addonAmt], $colW)."\n";
+                }
                 $out .= $this->cols([$unitQty, $discLabel, $amtLabel], $colW)."\n";
             } else {
                 // Simple: Item | Qty | Amount (no Disc. column)
@@ -1005,6 +1023,15 @@ class NetworkPrinterService
                     $out .= $name."\n".$this->cols(['', $qtyLabel, $amtLabel], $colW)."\n";
                 } else {
                     $out .= $this->cols([$name, $qtyLabel, $amtLabel], $colW)."\n";
+                }
+                foreach ($item->addons ?? [] as $addon) {
+                    if (! empty($addon->hide_on_receipt)) {
+                        continue;
+                    }
+                    $addonName = $this->safeEscPosText('+ '.(string) ($addon->addon_name ?? 'Addon'));
+                    $addonPrice = (float) ($addon->price ?? 0);
+                    $addonAmt = $addonPrice > 0 ? ('+'.number_format($addonPrice, 2)) : '';
+                    $out .= $this->cols([$addonName, '', $addonAmt], $colW)."\n";
                 }
             }
         }

@@ -1,10 +1,10 @@
 @extends('layouts.admin')
-@section('title', 'Add Add-on')
-@section('page_title', 'Add Add-on')
+@section('title', 'Add Modifier')
+@section('page_title', 'Add Modifier')
 @section('content')
 <div class="card">
     <div class="card-header d-flex justify-content-between align-items-center">
-        <h3 class="card-title">New Add-on</h3>
+        <h3 class="card-title">New Modifier</h3>
         <a href="{{ route('addons.index') }}" class="btn btn-secondary btn-sm">Back</a>
     </div>
     <div class="card-body">
@@ -17,7 +17,7 @@
                     @error('name')<div class="invalid-feedback">{{ $message }}</div>@enderror
                 </div>
                 <div class="col-md-3 mb-3">
-                    <label class="form-label">Price</label>
+                    <label class="form-label">Additional price</label>
                     <input type="number" step="0.01" min="0" name="price" class="form-control @error('price') is-invalid @enderror" value="{{ old('price', '0') }}" required>
                     @error('price')<div class="invalid-feedback">{{ $message }}</div>@enderror
                 </div>
@@ -32,7 +32,7 @@
             </div>
 
             <div class="mb-3">
-                <label class="form-label">Assign to products</label>
+                <label class="form-label">Assign directly to products (optional)</label>
                 <div class="border rounded p-3" style="max-height: 320px; overflow:auto;">
                     @forelse($products as $product)
                     <div class="form-check">
@@ -44,7 +44,7 @@
                     <div class="text-muted">No products available.</div>
                     @endforelse
                 </div>
-                <div class="form-text">One add-on can be linked to many products. Products can also have multiple add-ons.</div>
+                <div class="form-text">Prefer <a href="{{ route('addon-groups.create') }}">Modifier Sets</a> when the same group of modifiers applies to multiple products.</div>
             </div>
 
             <div class="form-actions">

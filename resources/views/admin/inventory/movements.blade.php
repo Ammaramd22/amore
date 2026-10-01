@@ -22,7 +22,7 @@
                 <tbody>
                     @forelse($movements as $m)
                     <tr>
-                        <td>{{ $m->created_at->format('Y-m-d H:i') }}</td>
+                        <td>{{ \App\Models\Setting::formatDateTime($m->created_at, 'Y-m-d H:i') }}</td>
                         <td>{{ $m->ingredient?->name }}</td>
                         <td><span class="badge bg-secondary">{{ $m->type }}</span></td>
                         <td>{{ number_format($m->quantity, 3) }}</td>

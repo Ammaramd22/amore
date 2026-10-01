@@ -47,7 +47,7 @@
                     <thead><tr><th>Order #</th><th>Total</th><th>Date</th></tr></thead>
                     <tbody>
                         @forelse($customer->orders()->latest()->limit(10)->get() as $order)
-                        <tr><td><a href="{{ route('orders.show', $order) }}">{{ $order->order_number }}</a></td><td>LKR {{ number_format($order->total_amount, 2) }}</td><td>{{ $order->created_at->format('Y-m-d') }}</td></tr>
+                        <tr><td><a href="{{ route('orders.show', $order) }}">{{ $order->order_number }}</a></td><td>LKR {{ number_format($order->total_amount, 2) }}</td><td>{{ \App\Models\Setting::formatDateTime($order->created_at, 'Y-m-d') }}</td></tr>
                         @empty
                         <tr><td colspan="3" class="text-center text-muted py-4">No orders yet</td></tr>
                         @endforelse

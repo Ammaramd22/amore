@@ -583,6 +583,7 @@
             :root { --card-min: 10.5rem; }
         }
     </style>
+    @include('partials.business-clock')
 </head>
 <body>
 @php
@@ -669,9 +670,7 @@
     };
 
     function updateClock() {
-        document.getElementById('clock').textContent = new Date().toLocaleTimeString('en-US', {
-            hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true
-        });
+        document.getElementById('clock').textContent = (window.BusinessClock ? BusinessClock.formatTime(true) : new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'}));
     }
     setInterval(updateClock, 1000);
     updateClock();

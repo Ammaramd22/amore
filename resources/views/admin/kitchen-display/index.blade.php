@@ -296,6 +296,7 @@
             .order-grid { grid-template-columns: 1fr; }
         }
     </style>
+    @include('partials.business-clock')
 </head>
 <body>
     <header class="kds-top">
@@ -332,14 +333,20 @@
     <script>
         let previousOrderIds = [];
         let currentKitchenId = '';
+        let lastOrdersFingerprint = '';
+        let lastReadyFingerprint = '';
         const SOUND_ENABLED = @json((bool) ($soundEnabled ?? true));
 
-        function tickClock() {
-            const now = new Date();
-            document.getElementById('clock').textContent = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        if (window.BusinessClock) {
+            BusinessClock.bind('#clock', { seconds: false });
+        } else {
+            function tickClock() {
+                const now = new Date();
+                document.getElementById('clock').textContent = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            }
+            setInterval(tickClock, 1000);
+            tickClock();
         }
-        setInterval(tickClock, 1000);
-        tickClock();
 
         document.getElementById('kitchenSelect').addEventListener('change', function () {
             currentKitchenId = this.value;
@@ -402,6 +409,7 @@
                     <div class="item-row ${rowClass}">
                         <div class="item-main">
                             <span class="item-name">${esc(item.name)}</span>
+                            ${(item.options || []).map(o => `<span class="item-note">${esc(o.name || ((o.option_set_name || '') + ': ' + (o.option_name || '')))}</span>`).join('')}
                             ${(item.addons || []).map(a => `<span class="item-note">+ ${esc(a.name)}</span>`).join('')}
                             ${item.instructions ? `<span class="item-note"><i class="fas fa-exclamation-circle me-1"></i>${esc(item.instructions)}</span>` : ''}
                             ${doneLabel}
@@ -444,9 +452,10 @@
                                 <i class="fas fa-utensils"></i>
                                 <h3>No active tickets</h3>
                                 <p>New KOTs will appear here automatically</p>
-                                <small>Last check: ${new Date().toLocaleTimeString()}</small>
+                                <small>Last check: ${window.BusinessClock ? BusinessClock.formatTime(true) : new Date().toLocaleTimeString()}</small>
                             </div>`;
                         previousOrderIds = [];
+                        lastOrdersFingerprint = '';
                         return;
                     }
 
@@ -455,6 +464,9 @@
                     if (newOrders.length > 0 && previousOrderIds.length > 0) playBell();
                     previousOrderIds = currentIds;
 
+                    const fp = JSON.stringify(data.orders || []);
+                    if (fp === lastOrdersFingerprint) return;
+                    lastOrdersFingerprint = fp;
                     container.innerHTML = data.orders.map(order => `
                         <div class="order-card is-${esc(order.status)} ${order.elapsed_minutes > 15 ? 'urgent' : ''}">
                             <div class="order-head">
@@ -562,9 +574,13 @@
                     const container = document.getElementById('readyContainer');
                     const orders = data.orders || [];
                     if (!orders.length) {
+                        lastReadyFingerprint = '';
                         container.innerHTML = '<div class="empty"><i class="fas fa-check-circle" style="color:#10b981;"></i><p>No ready orders</p></div>';
                         return;
                     }
+                    const rfp = JSON.stringify(orders);
+                    if (rfp === lastReadyFingerprint) return;
+                    lastReadyFingerprint = rfp;
                     container.innerHTML = orders.map(order => `
                         <div class="order-card is-ready">
                             <div class="order-head">
@@ -593,8 +609,15 @@
                 .catch(e => console.error('Load ready orders failed:', e));
         }
 
-        setInterval(loadOrders, 5000);
-        setInterval(loadReadyOrders, 5000);
+
+        function smartKdsInterval(fn, ms) {
+            return setInterval(function () {
+                if (document.hidden) return;
+                fn();
+            }, ms);
+        }
+        smartKdsInterval(loadOrders, 5000);
+        smartKdsInterval(loadReadyOrders, 5000);
         loadOrders();
         loadReadyOrders();
     </script>

@@ -115,6 +115,40 @@
         color: #fff !important;
     }
 
+    .dash-clock {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 0.55rem 0.85rem;
+        margin-top: 1rem;
+        padding: 0.7rem 1rem;
+        border-radius: 14px;
+        background: rgba(0, 0, 0, 0.28);
+        border: 1px solid rgba(255, 247, 237, 0.1);
+        width: fit-content;
+        max-width: 100%;
+    }
+    .dash-clock-date {
+        font-size: 0.82rem;
+        font-weight: 600;
+        color: rgba(255, 247, 237, 0.78);
+    }
+    .dash-clock-time {
+        font-size: 1.35rem;
+        font-weight: 800;
+        letter-spacing: -0.02em;
+        color: #fff;
+        font-variant-numeric: tabular-nums;
+        line-height: 1;
+    }
+    .dash-clock-tz {
+        font-size: 0.68rem;
+        font-weight: 650;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: #fbbf24;
+    }
+
     .dash-kpis {
         display: grid;
         grid-template-columns: repeat(4, minmax(0, 1fr));

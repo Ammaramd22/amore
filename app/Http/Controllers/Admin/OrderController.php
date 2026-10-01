@@ -52,6 +52,7 @@ class OrderController extends Controller
         $order->load([
             'items.product',
             'items.addons',
+            'items.options',
             'payments',
             'customer',
             'table',
@@ -87,7 +88,7 @@ class OrderController extends Controller
                 'paid_amount' => (float) $order->paid_amount,
                 'change_amount' => (float) $order->change_amount,
                 'currency' => $currency,
-                'created_at' => $order->created_at?->format('Y-m-d H:i'),
+                'created_at' => \App\Models\Setting::formatDateTime($order->created_at, 'Y-m-d H:i'),
                 'edit_url' => route('orders.edit', $order),
                 'print_receipt_url' => route('pos.print-receipt', $order),
                 'print_kot_url' => route('pos.print-kot', $order),
@@ -102,7 +103,7 @@ class OrderController extends Controller
                     'method' => ucfirst($p->method),
                     'amount' => (float) $p->amount,
                     'reference' => $p->reference_number,
-                    'created_at' => $p->created_at?->format('Y-m-d H:i'),
+                    'created_at' => \App\Models\Setting::formatDateTime($p->created_at, 'Y-m-d H:i'),
                 ]),
             ]);
         }

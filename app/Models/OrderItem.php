@@ -48,6 +48,11 @@ class OrderItem extends Model
         return $this->hasMany(OrderItemAddon::class);
     }
 
+    public function options()
+    {
+        return $this->hasMany(OrderItemOption::class);
+    }
+
     public function kitchenOrderItems()
     {
         return $this->hasMany(KitchenOrderItem::class);

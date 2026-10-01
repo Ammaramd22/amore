@@ -117,10 +117,19 @@
                             @php
                                 $tzValue = (string) ($setting->value ?: \App\Models\Setting::timezone());
                                 $tzList = timezone_identifiers_list();
+                                $tzLabels = [
+                                    'Asia/Colombo' => 'Sri Lanka (Asia/Colombo)',
+                                    'Asia/Kolkata' => 'India (Asia/Kolkata)',
+                                    'Asia/Dubai' => 'UAE (Asia/Dubai)',
+                                    'Asia/Singapore' => 'Singapore (Asia/Singapore)',
+                                    'UTC' => 'UTC',
+                                    'Europe/London' => 'United Kingdom (Europe/London)',
+                                    'America/New_York' => 'US Eastern (America/New_York)',
+                                ];
                             @endphp
                             <select name="{{ $setting->key }}" id="field-{{ $setting->key }}" class="form-select">
                                 @foreach($tzList as $tz)
-                                    <option value="{{ $tz }}" @selected($tzValue === $tz)>{{ $tz }}</option>
+                                    <option value="{{ $tz }}" @selected($tzValue === $tz)>{{ $tzLabels[$tz] ?? $tz }}</option>
                                 @endforeach
                             </select>
                         @elseif($setting->key === 'mail_mailer')

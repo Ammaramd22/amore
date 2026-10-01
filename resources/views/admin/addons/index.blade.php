@@ -1,19 +1,19 @@
 @extends('layouts.admin')
-@section('title', 'Add-ons')
-@section('page_title', 'Add-ons')
+@section('title', 'Modifiers')
+@section('page_title', 'Modifiers')
 @section('content')
 <div class="card">
     <div class="card-header d-flex justify-content-between align-items-center">
-        <h3 class="card-title">All Add-ons</h3>
+        <h3 class="card-title">All Modifiers</h3>
         @can('addons.create')
-        <a href="{{ route('addons.create') }}" class="btn btn-primary btn-sm"><i class="fas fa-plus me-1"></i>Add Add-on</a>
+        <a href="{{ route('addons.create') }}" class="btn btn-primary btn-sm"><i class="fas fa-plus me-1"></i>Add Modifier</a>
         @endcan
     </div>
     <div class="card-body">
         <form method="GET" class="row g-2 align-items-end index-filter-form">
             <div class="col-md-4">
                 <label class="form-label" for="filter_q">Search</label>
-                <input type="text" id="filter_q" name="q" class="form-control form-control-sm" placeholder="Add-on name" value="{{ request('q') }}">
+                <input type="text" id="filter_q" name="q" class="form-control form-control-sm" placeholder="Modifier name" value="{{ request('q') }}">
             </div>
             <div class="col-md-3">
                 <label class="form-label" for="filter_status">Status</label>
@@ -30,6 +30,7 @@
                 @endif
             </div>
         </form>
+        <p class="text-muted small mb-0 mt-2">Modifiers are optional extras (formerly Add-ons). Group them into <a href="{{ route('addon-groups.index') }}">Modifier Sets</a> to assign reusable options to products.</p>
     </div>
 </div>
 
@@ -39,7 +40,7 @@
             <div class="d-flex align-items-center justify-content-between">
                 <div>
                     <div class="stat-value">{{ $addons->total() }}</div>
-                    <div class="stat-label">Add-ons</div>
+                    <div class="stat-label">Modifiers</div>
                 </div>
                 <div class="stat-icon bg-primary text-white"><i class="fas fa-plus-circle"></i></div>
             </div>
@@ -61,7 +62,7 @@
             <div class="d-flex align-items-center justify-content-between">
                 <div>
                     <div class="stat-value">{{ $addons->sum('products_count') }}</div>
-                    <div class="stat-label">Product links (this page)</div>
+                    <div class="stat-label">Direct product links (this page)</div>
                 </div>
                 <div class="stat-icon bg-info text-white"><i class="fas fa-link"></i></div>
             </div>
@@ -102,7 +103,7 @@
                         <a href="{{ route('addons.edit', $addon) }}" class="btn btn-sm btn-outline-primary" title="Edit"><i class="fas fa-edit"></i></a>
                         @endcan
                         @can('addons.delete')
-                        <form action="{{ route('addons.destroy', $addon) }}" method="POST" class="d-inline" onsubmit="return confirm('Delete this add-on?')">
+                        <form action="{{ route('addons.destroy', $addon) }}" method="POST" class="d-inline" onsubmit="return confirm('Delete this modifier?')">
                             @csrf
                             @method('DELETE')
                             <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete"><i class="fas fa-trash"></i></button>
@@ -112,7 +113,7 @@
                 </tr>
                 @empty
                 <tr>
-                    <td colspan="6" class="text-center text-muted py-4">No add-ons yet. Create one and assign it to products.</td>
+                    <td colspan="6" class="text-center text-muted py-4">No modifiers yet. Create one and assign it to products or a modifier set.</td>
                 </tr>
                 @endforelse
             </tbody>

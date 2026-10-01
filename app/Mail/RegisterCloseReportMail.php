@@ -27,7 +27,7 @@ class RegisterCloseReportMail extends Mailable
         $isDay = $this->register->mode === 'day_end';
         $label = $isDay ? 'Day End Report' : 'Shift Report';
         $who = $this->register->user?->name ?? 'Cashier';
-        $when = $this->register->closed_at?->format('Y-m-d H:i') ?? now()->format('Y-m-d H:i');
+        $when = \App\Models\Setting::formatDateTime($this->register->closed_at ?? now(), 'Y-m-d H:i');
 
         return new Envelope(
             subject: sprintf('%s — %s — %s', $label, $who, $when),

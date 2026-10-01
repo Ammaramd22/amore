@@ -41,14 +41,23 @@ class DashboardController extends Controller
 
         [$startDate, $endDate] = $this->getDateRange($range, $from, $to);
 
-        $ordersInRange = fn () => \App\Services\BranchService::scopeOrders(
+        $baseOrders = \App\Services\BranchService::scopeOrders(
             Order::whereBetween('created_at', [$startDate, $endDate])->notVoid(),
             $branchId
         );
 
-        $sales = (float) $ordersInRange()->completed()->sum('total_amount');
-        $ordersCount = (int) $ordersInRange()->count();
-        $completedCount = (int) $ordersInRange()->completed()->count();
+        $agg = (clone $baseOrders)->selectRaw("
+            COALESCE(SUM(CASE WHEN status = 'completed' THEN total_amount ELSE 0 END), 0) as sales_total,
+            COUNT(*) as orders_count,
+            SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_count,
+            SUM(CASE WHEN order_type = 'dine_in' THEN 1 ELSE 0 END) as dine_in_count,
+            SUM(CASE WHEN order_type = 'takeaway' THEN 1 ELSE 0 END) as takeaway_count,
+            SUM(CASE WHEN order_type = 'delivery' THEN 1 ELSE 0 END) as delivery_count
+        ")->first();
+
+        $sales = (float) ($agg->sales_total ?? 0);
+        $ordersCount = (int) ($agg->orders_count ?? 0);
+        $completedCount = (int) ($agg->completed_count ?? 0);
 
         $data = [
             'range' => $range,
@@ -59,9 +68,9 @@ class DashboardController extends Controller
             'today_sales' => $sales,
             'today_orders' => $ordersCount,
             'avg_order' => $completedCount > 0 ? $sales / $completedCount : 0,
-            'dine_in_orders' => (int) $ordersInRange()->byType('dine_in')->count(),
-            'takeaway_orders' => (int) $ordersInRange()->byType('takeaway')->count(),
-            'delivery_orders' => (int) $ordersInRange()->byType('delivery')->count(),
+            'dine_in_orders' => (int) ($agg->dine_in_count ?? 0),
+            'takeaway_orders' => (int) ($agg->takeaway_count ?? 0),
+            'delivery_orders' => (int) ($agg->delivery_count ?? 0),
             'pending_kitchen' => (int) \App\Services\BranchService::scopeOrders(
                 Order::whereIn('status', ['pending', 'preparing'])->notVoid(),
                 $branchId
@@ -70,7 +79,9 @@ class DashboardController extends Controller
             'low_stock_items' => Ingredient::whereColumn('stock_quantity', '<=', 'reorder_level')
                 ->active()
                 ->when($branchId, fn ($q) => $q->where('branch_id', $branchId))
-                ->get(),
+                ->orderBy('name')
+                ->limit(30)
+                ->get(['id', 'name', 'stock_quantity', 'reorder_level', 'unit', 'branch_id']),
             'expiry_remind_days' => max(0, (int) Setting::get('expiry_remind_days', 7)),
             'expiring_items' => collect(),
             'best_selling' => DB::table('order_items')

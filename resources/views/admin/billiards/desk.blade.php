@@ -267,7 +267,7 @@
                     <div>
                         <div class="title">{{ $b->table?->name ?? 'Table' }} · {{ $b->displayName() }}</div>
                         <div class="meta">
-                            {{ $b->booking_number }} · {{ $b->scheduled_start?->format('H:i') }}–{{ $b->scheduled_end?->format('H:i') }}
+                            {{ $b->booking_number }} · {{ \App\Models\Setting::formatDateTime($b->scheduled_start, 'H:i') }}–{{ \App\Models\Setting::formatDateTime($b->scheduled_end, 'H:i') }}
                             · {{ rtrim(rtrim(number_format((float)$b->hours, 2), '0'), '.') }}h
                             · {{ $cur }} {{ number_format((float) $b->amount, 0) }}
                         </div>
@@ -471,7 +471,7 @@
     const clock = document.getElementById('bilClock');
     function tick(){
         if(!clock) return;
-        clock.textContent = new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+        clock.textContent = (window.BusinessClock ? BusinessClock.formatTime(true) : new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'}));
     }
     tick(); setInterval(tick, 1000);
 

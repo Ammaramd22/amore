@@ -94,7 +94,7 @@
                                 {{ ucfirst($order->status) }}
                             </span>
                         </td>
-                        <td class="text-muted" style="white-space:nowrap;">{{ $order->created_at->format('Y-m-d H:i') }}</td>
+                        <td class="text-muted" style="white-space:nowrap;">{{ \App\Models\Setting::formatDateTime($order->created_at, 'Y-m-d H:i') }}</td>
                         <td class="text-end">
                             <x-row-actions>
                                 <li><button type="button" class="dropdown-item" onclick="openOrderModal({{ $order->id }})"><i class="fas fa-eye"></i> View</button></li>
@@ -134,7 +134,7 @@
                 <div class="om-bottom">
                     <span class="badge-soft {{ $order->payment_status=='paid'?'success':'' }}">{{ ucfirst($order->payment_status) }}</span>
                     <span class="badge-soft {{ $order->status=='completed'?'success':($order->status=='cancelled'?'danger':'') }}">{{ ucfirst($order->status) }}</span>
-                    <span class="om-time">{{ $order->created_at->diffForHumans() }}</span>
+                    <span class="om-time">{{ \App\Models\Setting::formatDateTime($order->created_at, 'Y-m-d H:i') }}</span>
                 </div>
             </button>
             @empty

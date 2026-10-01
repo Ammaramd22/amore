@@ -4,6 +4,7 @@ use App\Http\Controllers\Admin\DashboardController;
 use App\Http\Controllers\Admin\CategoryController;
 use App\Http\Controllers\Admin\SubcategoryController;
 use App\Http\Controllers\Admin\AddonController;
+use App\Http\Controllers\Admin\AddonGroupController;
 use App\Http\Controllers\Admin\ProductController;
 use App\Http\Controllers\Admin\IngredientController;
 use App\Http\Controllers\Admin\RecipeController;
@@ -124,6 +125,8 @@ Route::middleware(['auth'])->group(function () {
     Route::resource('categories', CategoryController::class);
     Route::resource('subcategories', SubcategoryController::class);
     Route::resource('addons', AddonController::class);
+    Route::resource('addon-groups', AddonGroupController::class);
+    Route::resource('option-sets', \App\Http\Controllers\Admin\OptionSetController::class);
     Route::get('/products/import/template', [ProductController::class, 'importTemplate'])->name('products.import.template');
     Route::post('/products/import', [ProductController::class, 'import'])->name('products.import');
     Route::get('/products/next-code', [ProductController::class, 'nextCode'])->name('products.next-code');

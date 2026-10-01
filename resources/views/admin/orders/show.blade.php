@@ -34,7 +34,23 @@
                         <tbody>
                             @forelse($order->items as $item)
                             <tr>
-                                <td class="fw-semibold">{{ $item->product_name }}</td>
+                                <td class="fw-semibold">
+                                    {{ $item->product_name }}
+                                    @if($item->relationLoaded('options') && $item->options->isNotEmpty())
+                                    <div class="small text-muted fw-normal mt-1">
+                                        @foreach($item->options as $opt)
+                                        <div>{{ $opt->option_set_name }}: {{ $opt->option_name }}</div>
+                                        @endforeach
+                                    </div>
+                                    @endif
+                                    @if($item->addons->isNotEmpty())
+                                    <div class="small text-muted fw-normal mt-1">
+                                        @foreach($item->addons as $addon)
+                                        <div>+ {{ $addon->addon_name }}@if((float)$addon->price > 0) (+{{ number_format((float)$addon->price, 2) }})@endif</div>
+                                        @endforeach
+                                    </div>
+                                    @endif
+                                </td>
                                 <td>{{ $item->quantity }}</td>
                                 <td>LKR {{ number_format($item->unit_price, 2) }}</td>
                                 <td>LKR {{ number_format($item->total_price, 2) }}</td>
@@ -72,7 +88,7 @@
                                 <td>{{ ucfirst($payment->method) }}</td>
                                 <td>LKR {{ number_format($payment->amount, 2) }}</td>
                                 <td>{{ $payment->reference_number ?? '—' }}</td>
-                                <td>{{ $payment->created_at->format('Y-m-d H:i') }}</td>
+                                <td>{{ \App\Models\Setting::formatDateTime($payment->created_at, 'Y-m-d H:i') }}</td>
                             </tr>
                             @empty
                             <tr>

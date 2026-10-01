@@ -61,6 +61,7 @@
             .num { font-size: 1.8rem; min-width: 90px; }
         }
     </style>
+    @include('partials.business-clock')
 </head>
 <body>
 <header class="top">
@@ -81,7 +82,7 @@
 </div>
 <script>
 function tick() {
-    document.getElementById('clock').textContent = new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+    document.getElementById('clock').textContent = (window.BusinessClock ? BusinessClock.formatTime(true) : new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'}));
 }
 function loadOrders() {
     fetch('{{ route('display.orders') }}')

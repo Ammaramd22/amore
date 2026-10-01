@@ -61,12 +61,9 @@ class PosApiController extends Controller
         $q = $request->get('q');
         $categoryId = $request->get('category_id');
         $id = $request->get('id');
+        $withExtras = $id || $request->boolean('extras');
 
-        $products = Product::with([
-            'variants' => fn ($vq) => $vq->active()->orderBy('name'),
-            'sharedAddons' => fn ($aq) => $aq->active()->ordered(),
-            'addons' => fn ($aq) => $aq->active()->orderBy('name'),
-        ])
+        $query = Product::query()
             ->available()
             ->posVisible()
             ->when($id, fn ($query) => $query->where('id', $id))
@@ -75,37 +72,118 @@ class PosApiController extends Controller
                     ->orWhere('code', 'like', "%{$q}%")
                     ->orWhere('barcode', 'like', "%{$q}%");
             }))
-            ->when($categoryId, fn ($query) => $query->where('category_id', $categoryId))
-            ->get()
-            ->map(function ($p) {
-                $variants = $p->variants->map(fn ($v) => [
-                    'id' => $v->id,
-                    'name' => $v->name,
-                    'price_adjustment' => (float) $v->price_adjustment,
-                ])->values();
+            ->when($categoryId, fn ($query) => $query->where('category_id', $categoryId));
 
-                $shared = $p->sharedAddons;
-                $addonsSource = $shared->isNotEmpty() ? $shared : $p->addons;
-                $addons = $addonsSource->map(fn ($a) => [
-                    'id' => $a->id,
-                    'name' => $a->name,
-                    'price' => (float) $a->price,
-                    'shared' => $shared->isNotEmpty(),
-                ])->values();
+        if ($withExtras) {
+            $query->with([
+                'variants' => fn ($vq) => $vq->active()->orderBy('name'),
+                'sharedAddons' => fn ($aq) => $aq->active()->ordered(),
+                'addons' => fn ($aq) => $aq->active()->orderBy('name'),
+                'addonGroups' => fn ($gq) => $gq->active()->ordered()->with([
+                    'addons' => fn ($aq) => $aq->ordered(),
+                    'branches:id',
+                ]),
+                'optionSets' => fn ($oq) => $oq->active()->ordered()->with(['options' => fn ($opt) => $opt->active()->ordered()]),
+            ]);
+        } else {
+            $query->with([
+                'variants' => fn ($vq) => $vq->active()->orderBy('name'),
+            ])->withCount([
+                'addons as pos_addons_count' => fn ($aq) => $aq->active(),
+                'sharedAddons as pos_shared_addons_count' => fn ($aq) => $aq->active(),
+                'addonGroups as pos_addon_groups_count' => fn ($gq) => $gq->active(),
+                'optionSets as pos_option_sets_count' => fn ($oq) => $oq->active(),
+            ]);
+        }
+
+        $products = $query->get()->map(function ($p) use ($withExtras) {
+            $basePrice = (float) ($p->final_price ?? $p->selling_price ?? $p->price ?? 0);
+            $variants = $p->variants->map(fn ($v) => [
+                'id' => $v->id,
+                'name' => $v->name,
+                'price_adjustment' => (float) $v->price_adjustment,
+                'final_price' => $basePrice + (float) $v->price_adjustment,
+            ])->values();
+
+            if (! $withExtras) {
+                $hasAddons = (int) ($p->pos_addons_count ?? 0) > 0
+                    || (int) ($p->pos_shared_addons_count ?? 0) > 0
+                    || (int) ($p->pos_addon_groups_count ?? 0) > 0
+                    || (int) ($p->pos_option_sets_count ?? 0) > 0
+                    || (bool) $p->has_addons;
 
                 return [
                     'id' => $p->id,
                     'name' => $p->name,
-                    'price' => (float) ($p->final_price ?? $p->selling_price ?? $p->price ?? 0),
+                    'price' => $basePrice,
                     'category_id' => $p->category_id,
                     'subcategory_id' => $p->subcategory_id,
                     'image' => $p->imageUrl(),
                     'has_variants' => $variants->isNotEmpty() || (bool) $p->has_variants,
-                    'has_addons' => $addons->isNotEmpty() || (bool) $p->has_addons,
+                    'has_addons' => $hasAddons,
                     'variants' => $variants,
-                    'addons' => $addons,
+                    'addons' => [],
+                    'modifier_sets' => [],
+                    'option_sets' => [],
                 ];
-            });
+            }
+
+            $resolvedAddons = $p->posAddons();
+            $addons = $resolvedAddons->map(fn ($a) => [
+                'id' => $a->id,
+                'name' => $a->name,
+                'price' => (float) $a->price,
+                'shared' => $a instanceof \App\Models\Addon,
+            ])->values();
+
+            $modifierSets = $p->posModifierSets()->map(fn ($set) => [
+                'id' => $set['id'],
+                'name' => $set['name'],
+                'display_name' => $set['display_name'],
+                'require_selection' => $set['require_selection'],
+                'allow_multiple' => $set['allow_multiple'],
+                'hide_on_receipt' => $set['hide_on_receipt'],
+                'addons' => $set['addons']->map(fn ($a) => [
+                    'id' => $a->id,
+                    'name' => $a->name,
+                    'price' => (float) $a->price,
+                    'shared' => true,
+                    'group_id' => $set['id'],
+                    'is_preselected' => (bool) ($a->pivot->is_preselected ?? false),
+                    'hide_on_receipt' => $set['hide_on_receipt'],
+                ])->values(),
+            ])->values();
+
+            $optionSets = $p->posOptionSets()->map(fn ($set) => [
+                'id' => $set['id'],
+                'name' => $set['name'],
+                'display_name' => $set['display_name'],
+                'type' => $set['type'],
+                'require_selection' => $set['require_selection'],
+                'options' => $set['options']->map(fn ($o) => [
+                    'id' => $o->id,
+                    'name' => $o->name,
+                    'color' => $o->color,
+                    'option_set_id' => $set['id'],
+                    'option_set_name' => $set['display_name'],
+                ])->values(),
+            ])->values();
+
+            return [
+                'id' => $p->id,
+                'name' => $p->name,
+                'price' => $basePrice,
+                'category_id' => $p->category_id,
+                'subcategory_id' => $p->subcategory_id,
+                'image' => $p->imageUrl(),
+                'has_variants' => $variants->isNotEmpty() || (bool) $p->has_variants,
+                'has_addons' => $addons->isNotEmpty() || $optionSets->isNotEmpty() || $modifierSets->isNotEmpty() || (bool) $p->has_addons,
+                'variants' => $variants,
+                'addons' => $addons,
+                'modifier_sets' => $modifierSets,
+                'option_sets' => $optionSets,
+            ];
+        });
 
         return response()->json(['products' => $products]);
     }
@@ -1062,7 +1140,7 @@ class PosApiController extends Controller
                 'waiter' => $order->waiter?->name,
                 'total' => (float) $order->total_amount,
                 'items_count' => $order->items->where('is_void', false)->count(),
-                'bill_requested_at' => $order->bill_requested_at?->format('H:i'),
+                'bill_requested_at' => $order->bill_requested_at ? \App\Models\Setting::formatDateTime($order->bill_requested_at, 'H:i') : null,
                 'elapsed' => $order->bill_requested_at?->diffForHumans() ?? $order->created_at->diffForHumans(),
             ]);
 
@@ -1489,7 +1567,7 @@ class PosApiController extends Controller
 
     public function printReceipt(Request $request, Order $order)
     {
-        $order->loadMissing(['cashier', 'waiter', 'table', 'customer', 'deliveryPartner', 'items', 'payments.creator', 'branch']);
+        $order->loadMissing(['cashier', 'waiter', 'table', 'customer', 'deliveryPartner', 'items.addons', 'items.options', 'payments.creator', 'branch']);
         $branch = $order->branch ?? \App\Services\BranchService::current();
         $settings = array_merge(\App\Services\BranchService::invoiceSettings($branch), [
             'tax_enabled' => (bool) Setting::get('tax_enabled', false),
@@ -1509,7 +1587,7 @@ class PosApiController extends Controller
     public function printKot(Request $request, Order $order)
     {
         $order->loadMissing(['waiter', 'table']);
-        $query = KitchenOrder::with(['items.orderItem.addons'])
+        $query = KitchenOrder::with(['items.orderItem.addons', 'items.orderItem.options'])
             ->where('order_id', $order->id)
             ->where('type', 'kitchen');
 
@@ -1533,7 +1611,7 @@ class PosApiController extends Controller
     public function printBot(Request $request, Order $order)
     {
         $order->loadMissing(['waiter', 'table']);
-        $query = KitchenOrder::with(['items.orderItem.addons'])
+        $query = KitchenOrder::with(['items.orderItem.addons', 'items.orderItem.options'])
             ->where('order_id', $order->id)
             ->where('type', 'bar');
 
@@ -2093,26 +2171,31 @@ class PosApiController extends Controller
                             'total_price' => (float) $item->total_price,
                         ];
                     }),
-                    'created_at' => $order->created_at->format('H:i:s'),
+                    'created_at' => \App\Models\Setting::formatDateTime($order->created_at, 'H:i:s'),
                     'elapsed' => $order->created_at->diffForHumans(),
                 ];
             });
 
+        $occupiedTableIds = Order::query()
+            ->openBill()
+            ->where('order_type', 'dine_in')
+            ->whereNotNull('table_id')
+            ->pluck('table_id')
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
+
         $tables = \App\Models\RestaurantTable::with('floor')
             ->where('is_active', true)
             ->get()
-            ->map(function($table) {
-                $hasOrder = Order::query()
-                    ->openBill()
-                    ->where('table_id', $table->id)
-                    ->where('order_type', 'dine_in')
-                    ->exists();
+            ->map(function($table) use ($occupiedTableIds) {
                 return [
                     'id' => $table->id,
                     'name' => $table->name,
                     'capacity' => $table->capacity,
                     'floor_name' => $table->floor?->name ?? 'Main',
-                    'status' => $hasOrder ? 'occupied' : 'available',
+                    'status' => in_array((int) $table->id, $occupiedTableIds, true) ? 'occupied' : 'available',
                 ];
             });
 
@@ -2215,7 +2298,7 @@ class PosApiController extends Controller
                     'waiter' => $order->waiter?->name,
                     'total' => (float) $order->total_amount,
                     'items_count' => $order->items->where('is_void', false)->count(),
-                    'created_at' => $order->created_at->format('H:i:s'),
+                    'created_at' => \App\Models\Setting::formatDateTime($order->created_at, 'H:i:s'),
                     'has_kot' => $order->kitchenOrders->contains(fn ($k) => $k->type === 'kitchen'),
                     'has_bot' => $order->kitchenOrders->contains(fn ($k) => $k->type === 'bar'),
                     'kitchen_orders' => $order->kitchenOrders->map(function($kot) {
@@ -2619,6 +2702,21 @@ class PosApiController extends Controller
                 'addon_id' => $useShared ? $addonId : null,
                 'addon_name' => $addon['name'] ?? $addon['addon_name'] ?? 'Addon',
                 'price' => ($isLoyaltyFree || $isComp) ? 0 : (float) ($addon['price'] ?? 0),
+                'hide_on_receipt' => ! empty($addon['hide_on_receipt']),
+            ]);
+        }
+
+        foreach ($item['options'] ?? [] as $opt) {
+            $optName = trim((string) ($opt['name'] ?? $opt['option_name'] ?? ''));
+            if ($optName === '') {
+                continue;
+            }
+            \App\Models\OrderItemOption::create([
+                'order_item_id' => $orderItem->id,
+                'option_set_id' => isset($opt['option_set_id']) ? (int) $opt['option_set_id'] : null,
+                'option_id' => isset($opt['id']) ? (int) $opt['id'] : (isset($opt['option_id']) ? (int) $opt['option_id'] : null),
+                'option_set_name' => trim((string) ($opt['option_set_name'] ?? $opt['set_name'] ?? 'Option')),
+                'option_name' => $optName,
             ]);
         }
 
@@ -2656,7 +2754,7 @@ class PosApiController extends Controller
 
     public function orderDetails(Order $order)
     {
-        $order->load(['customer', 'table.floor', 'waiter', 'cashier', 'items.product.category', 'items.addons', 'kitchenOrders.items', 'kitchenOrders.kitchen', 'payments']);
+        $order->load(['customer', 'table.floor', 'waiter', 'cashier', 'items.product.category', 'items.variant', 'items.addons', 'kitchenOrders.items', 'kitchenOrders.kitchen', 'payments']);
 
         return response()->json([
             'order' => [
@@ -2686,6 +2784,11 @@ class PosApiController extends Controller
                 'total_amount' => (float) $order->total_amount,
                 'order_notes' => $order->order_notes,
                 'items' => $order->items->where('is_void', false)->values()->map(function ($item) {
+                    $variantName = $item->variant?->name;
+                    if (! $variantName && $item->product_variant_id && preg_match('/\(([^)]+)\)\s*$/', (string) $item->product_name, $m)) {
+                        $variantName = $m[1];
+                    }
+
                     return [
                         'id' => $item->id,
                         'product_id' => $item->product_id,
@@ -2702,12 +2805,17 @@ class PosApiController extends Controller
                         'comp_reason' => $item->comp_reason,
                         'routed_to' => $item->routed_to,
                         'special_instructions' => $item->special_instructions,
+                        'variant_id' => $item->product_variant_id,
+                        'variant_name' => $variantName,
                         'addons' => $item->addons->map(function ($addon) {
+                            $shared = (bool) $addon->addon_id;
+
                             return [
-                                'id' => $addon->product_addon_id ?? $addon->id,
+                                'id' => $addon->addon_id ?? $addon->product_addon_id ?? $addon->id,
                                 'name' => $addon->addon_name,
                                 'addon_name' => $addon->addon_name,
                                 'price' => (float) $addon->price,
+                                'shared' => $shared,
                             ];
                         }),
                     ];

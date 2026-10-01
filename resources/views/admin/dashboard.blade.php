@@ -23,6 +23,11 @@
             <p class="dash-eyebrow">ResPOS overview</p>
             <h2 class="dash-title">{{ $range_label }} at a glance</h2>
             <p class="dash-sub">Sales, kitchen load, and what guests are ordering — keep the floor moving.</p>
+            <div class="dash-clock" id="dashBusinessClock" title="{{ \App\Models\Setting::timezone() }}">
+                <span class="dash-clock-date" data-clock-date>—</span>
+                <span class="dash-clock-time" data-clock-time>--:--</span>
+                <span class="dash-clock-tz" data-clock-tz>{{ \App\Models\Setting::timezone() }}</span>
+            </div>
         </div>
         <div class="dash-hero-actions">
             <form method="GET" class="dash-range" id="dashRangeForm">
@@ -399,7 +404,7 @@
                             <td><a href="{{ route('billiards.bookings.show', $b) }}" class="dash-order-link">{{ $b->booking_number }}</a></td>
                             <td>{{ $b->table?->name ?? '—' }}</td>
                             <td>{{ $b->displayName() }}</td>
-                            <td>{{ $b->scheduled_start?->format('H:i') }}–{{ $b->scheduled_end?->format('H:i') }}</td>
+                            <td>{{ \App\Models\Setting::formatDateTime($b->scheduled_start, 'H:i') }}–{{ \App\Models\Setting::formatDateTime($b->scheduled_end, 'H:i') }}</td>
                             <td><span class="dash-badge {{ $b->payment_status === 'paid' ? 'tone-ok' : 'tone-amber' }}">{{ ucfirst($b->payment_status) }}</span></td>
                         </tr>
                         @empty
@@ -453,7 +458,7 @@
                                 {{ ucfirst($order->status) }}
                             </span>
                         </td>
-                        <td class="text-muted">{{ $order->created_at->diffForHumans() }}</td>
+                        <td class="text-muted" title="{{ \App\Models\Setting::formatDateTime($order->created_at, 'Y-m-d H:i:s') }}">{{ \App\Models\Setting::formatDateTime($order->created_at, 'H:i') }}</td>
                     </tr>
                     @empty
                     <tr>
@@ -473,6 +478,13 @@
 
 @push('scripts')
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script>
+(function () {
+    if (window.BusinessClock) {
+        BusinessClock.bind('#dashBusinessClock', { mode: 'split', seconds: true });
+    }
+})();
+</script>
 <script>
 (function () {
     const el = document.getElementById('salesChart');

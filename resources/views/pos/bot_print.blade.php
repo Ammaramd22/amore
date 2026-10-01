@@ -36,8 +36,12 @@
     <div class="bold">{{ rtrim(rtrim(number_format((float) $item->quantity, 3, '.', ''), '0'), '.') }}x {{ $item->product_name }}</div>
     @php
         $botAddons = $item->orderItem?->addons ?? collect();
-    @endphp
-    @foreach($botAddons as $addon)
+        $botOptions = $item->orderItem?->options ?? collect();
+        @endphp
+        @foreach($botOptions as $opt)
+        <div class="kot-note">{{ $opt->option_set_name }}: {{ $opt->option_name }}</div>
+        @endforeach
+        @foreach($botAddons as $addon)
     <div style="padding-left:10px;">+ {{ $addon->addon_name }}</div>
     @endforeach
     @if($item->special_instructions)

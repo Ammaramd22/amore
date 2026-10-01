@@ -672,6 +672,7 @@
             display: none !important;
         }
     </style>
+    @include('partials.business-clock')
 </head>
 @php
     $posUiMode = \App\Http\Controllers\Auth\ShopUiController::currentMode(

@@ -83,7 +83,7 @@
                     <tr>
                         <td>{{ $reg->id }}</td>
                         <td class="fw-semibold">{{ $reg->user?->name ?? '—' }}</td>
-                        <td>{{ $reg->opened_at?->format('Y-m-d H:i') }}</td>
+                        <td>{{ \App\Models\Setting::formatDateTime($reg->opened_at, 'Y-m-d H:i') }}</td>
                         <td class="text-end">{{ $cur }} {{ number_format($reg->opening_balance, 2) }}</td>
                         <td class="text-end">{{ $cur }} {{ number_format($reg->total_sales, 2) }}</td>
                         <td class="text-end">{{ $reg->orders_count }}</td>
@@ -122,8 +122,8 @@
                             <td class="fw-semibold">{{ $date }}</td>
                             <td>{{ $reg->id }}</td>
                             <td>{{ $reg->user?->name ?? '—' }}</td>
-                            <td>{{ $reg->opened_at?->format('H:i') }}</td>
-                            <td>{{ $reg->closed_at?->format('H:i') }}</td>
+                            <td>{{ \App\Models\Setting::formatDateTime($reg->opened_at, 'H:i') }}</td>
+                            <td>{{ \App\Models\Setting::formatDateTime($reg->closed_at, 'H:i') }}</td>
                             <td class="text-end">{{ number_format($reg->opening_balance, 2) }}</td>
                             <td class="text-end">{{ number_format($reg->closing_balance, 2) }}</td>
                             <td class="text-end fw-bold {{ $diff >= 0 ? 'text-success' : 'text-danger' }}">
@@ -176,7 +176,7 @@
                         <td>{{ $day->id }}</td>
                         <td class="fw-semibold">{{ $day->business_date?->format('Y-m-d') }}</td>
                         <td>{{ $day->user?->name ?? '—' }}</td>
-                        <td>{{ $day->closed_at?->format('Y-m-d H:i') }}</td>
+                        <td>{{ \App\Models\Setting::formatDateTime($day->closed_at, 'Y-m-d H:i') }}</td>
                         <td class="text-end">{{ number_format($day->total_sales, 2) }}</td>
                         <td class="text-end">{{ $day->orders_count }}</td>
                         <td class="text-end {{ $diff >= 0 ? 'text-success' : 'text-danger' }}">{{ ($diff >= 0 ? '+' : '') . number_format($diff, 2) }}</td>
@@ -218,8 +218,8 @@
                     <tr>
                         <td>{{ $reg->id }}</td>
                         <td class="fw-semibold">{{ $reg->user?->name ?? '—' }}</td>
-                        <td>{{ $reg->opened_at?->format('Y-m-d H:i') }}</td>
-                        <td>{{ $reg->closed_at?->format('Y-m-d H:i') }}</td>
+                        <td>{{ \App\Models\Setting::formatDateTime($reg->opened_at, 'Y-m-d H:i') }}</td>
+                        <td>{{ \App\Models\Setting::formatDateTime($reg->closed_at, 'Y-m-d H:i') }}</td>
                         <td class="text-end">{{ number_format($reg->opening_balance, 2) }}</td>
                         <td class="text-end">{{ number_format($reg->closing_balance, 2) }}</td>
                         <td class="text-end">{{ number_format($reg->expected_cash, 2) }}</td>

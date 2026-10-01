@@ -831,6 +831,10 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11.10.8/dist/sweetalert2.all.min.js"></script>
 <script>
+        function smartWaiterInterval(fn, ms) {
+            return setInterval(function () { if (document.hidden) return; fn(); }, ms);
+        }
+
         const csrf = document.querySelector('meta[name="csrf-token"]').content;
         const currency = @json($settings['currency_symbol'] ?? 'LKR');
         let printAskBefore = {{ $settings['print_ask_before'] ? 'true' : 'false' }};
@@ -1794,7 +1798,11 @@
                 (c.products || []).forEach(p => list.push(p));
             });
             document.getElementById('productGrid').innerHTML = list.map(p => {
-                const hasMods = (p.variants && p.variants.length) || (p.addons && p.addons.length) || p.has_variants || p.has_addons;
+                const hasMods = (p.variants && p.variants.length)
+                    || (p.addons && p.addons.length)
+                    || (p.option_sets && p.option_sets.length)
+                    || (p.modifier_sets && p.modifier_sets.length)
+                    || p.has_variants || p.has_addons;
                 return `
                 <div class="product-card" onclick="addProductById(${p.id})" role="button" aria-label="Add ${escapeHtml(p.name)}">
                     <div class="pname">${escapeHtml(p.name)}${hasMods ? ' <i class="fas fa-sliders-h" style="font-size:0.7rem;opacity:.55;"></i>' : ''}</div>
@@ -1814,7 +1822,7 @@
             let product = null;
             categories.forEach(c => (c.products || []).forEach(p => { if (p.id === id) product = p; }));
             if (!product) return;
-            if ((product.variants && product.variants.length) || (product.addons && product.addons.length) || product.has_variants || product.has_addons) {
+            if ((product.variants && product.variants.length) || (product.addons && product.addons.length) || (product.option_sets && product.option_sets.length) || (product.modifier_sets && product.modifier_sets.length) || product.has_variants || product.has_addons) {
                 showModifierSheet(product);
                 return;
             }
@@ -1828,6 +1836,8 @@
         function showModifierSheet(product) {
             const variants = product.variants || [];
             const addons = product.addons || [];
+            const sets = product.modifier_sets || [];
+            const optionSets = product.option_sets || [];
             const base = Number(product.price || 0);
 
             let html = `<div style="text-align:left;">
@@ -1838,32 +1848,76 @@
 
             if (variants.length) {
                 html += `<div style="margin-bottom:14px;">
-                    <div style="font-weight:600;margin-bottom:8px;color:#57534e;">Portion / Size</div>
+                    <div style="font-weight:600;margin-bottom:8px;color:#57534e;">Select Variation</div>
                     <div id="wVariantList" style="display:grid;gap:8px;">`;
                 variants.forEach((v, i) => {
                     const adj = Number(v.price_adjustment || 0);
-                    const adjLabel = adj === 0 ? 'Base' : (adj > 0 ? `+${currency} ${adj.toFixed(0)}` : `-${currency} ${Math.abs(adj).toFixed(0)}`);
+                    const finalPrice = Number(v.final_price != null ? v.final_price : (base + adj));
                     html += `<label style="display:flex;align-items:center;gap:10px;padding:12px;border:1px solid #e7e5e4;border-radius:12px;cursor:pointer;background:#fff;">
                         <input type="radio" name="wVariant" value="${v.id}" data-name="${escapeHtml(v.name)}" data-adj="${adj}" ${i === 0 ? 'checked' : ''} style="width:18px;height:18px;">
                         <span style="flex:1;font-weight:600;">${escapeHtml(v.name)}</span>
-                        <span style="color:#f59e0b;font-weight:700;">${adjLabel}</span>
+                        <span style="color:#f59e0b;font-weight:700;">${currency} ${finalPrice.toFixed(2)}</span>
                     </label>`;
                 });
                 html += `</div></div>`;
             }
 
-            if (addons.length) {
-                html += `<div style="margin-bottom:14px;">
-                    <div style="font-weight:600;margin-bottom:8px;color:#57534e;">Add-ons</div>
-                    <div id="wAddonList" style="display:grid;gap:8px;">`;
-                addons.forEach(a => {
-                    html += `<label style="display:flex;align-items:center;gap:10px;padding:12px;border:1px solid #e7e5e4;border-radius:12px;cursor:pointer;background:#fff;">
-                        <input type="checkbox" class="w-addon" value="${a.id}" data-name="${escapeHtml(a.name)}" data-price="${Number(a.price || 0)}" style="width:18px;height:18px;">
-                        <span style="flex:1;font-weight:600;">${escapeHtml(a.name)}</span>
-                        <span style="color:#f59e0b;font-weight:700;">+${currency} ${Number(a.price || 0).toFixed(0)}</span>
-                    </label>`;
+            if (optionSets.length) {
+                html += `<div style="margin-bottom:14px;"><div style="font-weight:600;margin-bottom:8px;color:#57534e;">Options</div>`;
+                optionSets.forEach(set => {
+                    const label = set.display_name || set.name;
+                    const req = set.require_selection ? ' · required' : '';
+                    html += `<div style="font-size:0.8rem;color:#78716c;margin:8px 0 6px;">${escapeHtml(label)}${req}</div><div style="display:grid;gap:8px;" data-option-set-id="${set.id}">`;
+                    (set.options || []).forEach(o => {
+                        const colorDot = (set.type === 'text_color' && o.color)
+                            ? `<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:${o.color};border:1px solid #ccc;"></span>`
+                            : '';
+                        html += `<label style="display:flex;align-items:center;gap:10px;padding:12px;border:1px solid #e7e5e4;border-radius:12px;cursor:pointer;background:#fff;">
+                            <input type="radio" class="w-option" name="wOptSet_${set.id}" value="${o.id}" data-name="${escapeHtml(o.name)}" data-set-id="${set.id}" data-set-name="${escapeHtml(label)}" style="width:18px;height:18px;">
+                            ${colorDot}
+                            <span style="flex:1;font-weight:600;">${escapeHtml(o.name)}</span>
+                        </label>`;
+                    });
+                    html += `</div>`;
                 });
-                html += `</div></div>`;
+                html += `</div>`;
+            }
+
+            if (addons.length || sets.length) {
+                const renderAddon = (a, set) => {
+                    const allowMulti = !set || set.allow_multiple !== false;
+                    const inputType = allowMulti ? 'checkbox' : 'radio';
+                    const groupName = set ? `wModSet_${set.id}` : 'wModOther';
+                    const pre = a.is_preselected ? 'checked' : '';
+                    return `<label style="display:flex;align-items:center;gap:10px;padding:12px;border:1px solid #e7e5e4;border-radius:12px;cursor:pointer;background:#fff;">
+                        <input type="${inputType}" class="w-addon" name="${groupName}" value="${a.id}" data-name="${escapeHtml(a.name)}" data-price="${Number(a.price || 0)}" data-shared="1" data-group-id="${set ? set.id : ''}" data-hide-receipt="${(set && set.hide_on_receipt) || a.hide_on_receipt ? '1' : '0'}" ${pre} style="width:18px;height:18px;">
+                        <span style="flex:1;font-weight:600;">${escapeHtml(a.name)}</span>
+                        <span style="color:#f59e0b;font-weight:700;">${Number(a.price || 0) > 0 ? '+' : ''}${currency} ${Number(a.price || 0).toFixed(0)}</span>
+                    </label>`;
+                };
+
+                html += `<div style="margin-bottom:14px;">
+                    <div style="font-weight:600;margin-bottom:8px;color:#57534e;">Modifiers</div>`;
+                if (sets.length) {
+                    const shown = new Set();
+                    sets.forEach(set => {
+                        const req = set.require_selection ? ' · required' : '';
+                        html += `<div style="font-size:0.8rem;color:#78716c;margin:8px 0 6px;">${escapeHtml(set.display_name || set.name)}${req}</div><div style="display:grid;gap:8px;" data-set-id="${set.id}">`;
+                        (set.addons || []).forEach(a => { shown.add(a.id); html += renderAddon(a, set); });
+                        html += `</div>`;
+                    });
+                    const extras = addons.filter(a => !shown.has(a.id));
+                    if (extras.length) {
+                        html += `<div style="font-size:0.8rem;color:#78716c;margin:8px 0 6px;">Other modifiers</div><div style="display:grid;gap:8px;">`;
+                        extras.forEach(a => { html += renderAddon(a, null); });
+                        html += `</div>`;
+                    }
+                } else {
+                    html += `<div id="wAddonList" style="display:grid;gap:8px;">`;
+                    addons.forEach(a => { html += renderAddon(a, null); });
+                    html += `</div>`;
+                }
+                html += `</div>`;
             }
 
             html += `<div style="margin-bottom:8px;">
@@ -1899,8 +1953,25 @@
                 },
                 preConfirm: () => {
                     if (variants.length && !document.querySelector('input[name="wVariant"]:checked')) {
-                        Swal.showValidationMessage('Select a portion');
+                        Swal.showValidationMessage('Select a variation');
                         return false;
+                    }
+                    for (const set of optionSets) {
+                        if (!set.require_selection) continue;
+                        const picked = document.querySelector(`input[name="wOptSet_${set.id}"]:checked`);
+                        if (!picked) {
+                            Swal.showValidationMessage('Select required: ' + (set.display_name || set.name));
+                            return false;
+                        }
+                    }
+                    for (const set of sets) {
+                        if (!set.require_selection) continue;
+                        const ids = new Set((set.addons || []).map(a => a.id));
+                        const picked = [...document.querySelectorAll('.w-addon:checked')].some(el => ids.has(Number(el.value)));
+                        if (!picked) {
+                            Swal.showValidationMessage('Select required: ' + (set.display_name || set.name));
+                            return false;
+                        }
                     }
                     const checked = document.querySelector('input[name="wVariant"]:checked');
                     const selectedAddons = [];
@@ -1909,6 +1980,18 @@
                             id: Number(el.value),
                             name: el.dataset.name,
                             price: Number(el.dataset.price || 0),
+                            shared: el.dataset.shared !== '0',
+                            group_id: el.dataset.groupId ? Number(el.dataset.groupId) : null,
+                            hide_on_receipt: el.dataset.hideReceipt === '1',
+                        });
+                    });
+                    const selectedOptions = [];
+                    document.querySelectorAll('.w-option:checked').forEach(el => {
+                        selectedOptions.push({
+                            id: Number(el.value),
+                            name: el.dataset.name,
+                            option_set_id: Number(el.dataset.setId),
+                            option_set_name: el.dataset.setName || 'Option',
                         });
                     });
                     return {
@@ -1918,12 +2001,13 @@
                             price_adjustment: Number(checked.dataset.adj || 0),
                         } : null,
                         addons: selectedAddons,
+                        options: selectedOptions,
                         note: (document.getElementById('wItemNote')?.value || '').trim(),
                     };
                 }
             }).then(res => {
                 if (!res.isConfirmed || !res.value) return;
-                const { variant, addons: selectedAddons, note } = res.value;
+                const { variant, addons: selectedAddons, options: selectedOptions, note } = res.value;
                 const unitPrice = base + (variant ? Number(variant.price_adjustment || 0) : 0);
                 const displayName = variant ? `${product.name} (${variant.name})` : product.name;
                 cart.push({
@@ -1934,11 +2018,13 @@
                     variant_id: variant?.id || null,
                     variant_name: variant?.name || null,
                     addons: selectedAddons,
+                    options: selectedOptions || [],
                     special_instructions: note || '',
                 });
                 updateCartUI();
                 const extras = [];
                 if (variant) extras.push(variant.name);
+                if ((selectedOptions || []).length) extras.push(selectedOptions.map(o => o.name).join(', '));
                 if (selectedAddons.length) extras.push(selectedAddons.map(a => a.name).join(', '));
                 showToast('success', displayName + (extras.length ? ' · ' + extras.join(' · ') : '') + ' added');
             });
@@ -1948,6 +2034,7 @@
             const existing = cart.find(i =>
                 i.product_id === product.id &&
                 !(i.addons || []).length &&
+                !(i.options || []).length &&
                 !i.variant_id &&
                 !(i.special_instructions || '')
             );
@@ -1960,6 +2047,7 @@
                 variant_id: null,
                 variant_name: null,
                 addons: [],
+                options: [],
                 special_instructions: ''
             });
             updateCartUI();
@@ -2133,13 +2221,15 @@
                 html += `<div class="section-label">New items — add note per item</div>`;
                 html += cart.map((item, idx) => {
                     const addonNames = (item.addons || []).map(a => a.name).join(', ');
+                    const optionNames = (item.options || []).map(o => (o.option_set_name ? o.option_set_name + ': ' : '') + (o.name || o.option_name || '')).join(', ');
                     const unit = lineUnitPrice(item);
                     const note = (item.special_instructions || '').trim();
+                    const extras = [optionNames, addonNames ? '+' + addonNames : ''].filter(Boolean).join(' · ');
                     return `
                     <div class="cart-item">
                         <div style="flex:1;min-width:0;">
                             <div class="item-name">${escapeHtml(item.name)}</div>
-                            <div class="item-meta">${currency} ${unit.toFixed(2)}${addonNames ? ' · +' + escapeHtml(addonNames) : ''}</div>
+                            <div class="item-meta">${currency} ${unit.toFixed(2)}${extras ? ' · ' + escapeHtml(extras) : ''}</div>
                             ${note ? `<div class="item-note-chip"><i class="fas fa-sticky-note me-1"></i>${escapeHtml(note)}</div>` : ''}
                             <button type="button" class="btn-note" onclick="editItemNote(${idx})"><i class="fas fa-sticky-note me-1"></i>${note ? 'Edit note' : 'Add note'}</button>
                         </div>
@@ -2348,7 +2438,7 @@
                 .catch(() => { if (resumeDraft && peekDraft()) resumeDraftOrder(); });
         }
 
-        setInterval(() => {
+        smartWaiterInterval(() => {
             refreshQrPending();
         }, 4000);
 

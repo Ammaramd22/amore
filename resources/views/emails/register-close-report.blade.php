@@ -18,8 +18,8 @@
 </p>
 
 <table cellpadding="6" cellspacing="0" style="border-collapse:collapse; width:100%; max-width:520px;">
-    <tr><td>Opened</td><td align="right">{{ $register->opened_at?->format('Y-m-d H:i') }}</td></tr>
-    <tr><td>Closed</td><td align="right">{{ $register->closed_at?->format('Y-m-d H:i') }}</td></tr>
+    <tr><td>Opened</td><td align="right">{{ \App\Models\Setting::formatDateTime($register->opened_at, 'Y-m-d H:i') }}</td></tr>
+    <tr><td>Closed</td><td align="right">{{ \App\Models\Setting::formatDateTime($register->closed_at, 'Y-m-d H:i') }}</td></tr>
     <tr><td>Orders</td><td align="right">{{ $register->orders_count }}</td></tr>
     <tr><td>Total sales</td><td align="right"><strong>{{ $currency }} {{ $fmt($register->total_sales) }}</strong></td></tr>
     <tr><td>Cash / Card / Bank / Online / Credit</td><td align="right">

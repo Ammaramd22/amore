@@ -255,6 +255,7 @@
             .card.playing::before, .card.ending, .live-pill i, .run-tag .dot { animation: none !important; }
         }
     </style>
+    @include('partials.business-clock')
 </head>
 <body>
 <header class="top">
@@ -360,8 +361,8 @@
             over ? 'overtime' : (ending ? 'ending' : ''),
         ].filter(Boolean).join(' ');
         const tCls = over ? 'over' : (ending ? 'soon' : '');
-        const start = row.starts_at ? new Date(row.starts_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '';
-        const end = row.ends_at ? new Date(row.ends_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '';
+        const start = row.starts_at ? (window.BusinessClock ? BusinessClock.formatInstant(row.starts_at, {hour:'2-digit', minute:'2-digit'}) : new Date(row.starts_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})) : '';
+        const end = row.ends_at ? (window.BusinessClock ? BusinessClock.formatInstant(row.ends_at, {hour:'2-digit', minute:'2-digit'}) : new Date(row.ends_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})) : '';
 
         return `<article class="card ${cls}" data-id="${row.id}">
             <div class="eight eight--sm ${withLiveTimer ? 'eight--spin' : 'eight--idle'}" style="background-image:url('${eightUrl}')" aria-hidden="true"></div>
@@ -378,8 +379,8 @@
     }
 
     function bookedHtml(row) {
-        const start = row.starts_at ? new Date(row.starts_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '';
-        const end = row.ends_at ? new Date(row.ends_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '';
+        const start = row.starts_at ? (window.BusinessClock ? BusinessClock.formatInstant(row.starts_at, {hour:'2-digit', minute:'2-digit'}) : new Date(row.starts_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})) : '';
+        const end = row.ends_at ? (window.BusinessClock ? BusinessClock.formatInstant(row.ends_at, {hour:'2-digit', minute:'2-digit'}) : new Date(row.ends_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})) : '';
         return `<article class="card">
             <div class="eight eight--sm eight--idle" style="background-image:url('${eightUrl}')" aria-hidden="true"></div>
             <div>
@@ -453,7 +454,12 @@
     }
 
     function tickClock() {
-        document.getElementById('clock').textContent = new Date().toLocaleTimeString([], {
+        if (window.BusinessClock) {
+            if (typeof offsetMs === 'number') BusinessClock.syncFromServerMs(Date.now() + offsetMs);
+            document.getElementById('clock').textContent = BusinessClock.formatTime(true);
+            return;
+        }
+        document.getElementById('clock').textContent = new Date(Date.now() + (offsetMs || 0)).toLocaleTimeString([], {
             hour: '2-digit', minute: '2-digit', second: '2-digit'
         });
     }
@@ -463,7 +469,7 @@
             const r = await fetch(feedUrl, { headers: { 'Accept': 'application/json' } });
             if (!r.ok) return;
             const data = await r.json();
-            if (data.server_ms) offsetMs = data.server_ms - Date.now();
+            if (data.server_ms) { offsetMs = data.server_ms - Date.now(); if (window.BusinessClock) BusinessClock.syncFromServerMs(data.server_ms); }
             playing = data.playing || [];
             booked = data.booked || [];
             free = data.free || [];

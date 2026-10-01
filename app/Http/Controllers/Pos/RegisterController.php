@@ -29,7 +29,7 @@ class RegisterController extends Controller
             'register' => $register ? [
                 'id' => $register->id,
                 'mode' => $register->mode,
-                'opened_at' => $register->opened_at->format('Y-m-d H:i:s'),
+                'opened_at' => \App\Models\Setting::formatDateTime($register->opened_at, 'Y-m-d H:i:s'),
                 'opening_balance' => $register->opening_balance,
                 'cash_sales' => $register->cash_sales,
                 'orders_count' => $register->orders_count,
@@ -82,7 +82,7 @@ class RegisterController extends Controller
             'register' => [
                 'id' => $register->id,
                 'mode' => $register->mode,
-                'opened_at' => $register->opened_at->format('Y-m-d H:i:s'),
+                'opened_at' => \App\Models\Setting::formatDateTime($register->opened_at, 'Y-m-d H:i:s'),
                 'opening_balance' => $register->opening_balance,
             ],
         ]);
@@ -172,8 +172,8 @@ class RegisterController extends Controller
                 'difference' => (float) $register->difference,
                 'total_sales' => (float) $register->total_sales,
                 'orders_count' => (int) $register->orders_count,
-                'opened_at' => $register->opened_at->format('Y-m-d H:i:s'),
-                'closed_at' => $register->closed_at->format('Y-m-d H:i:s'),
+                'opened_at' => \App\Models\Setting::formatDateTime($register->opened_at, 'Y-m-d H:i:s'),
+                'closed_at' => \App\Models\Setting::formatDateTime($register->closed_at, 'Y-m-d H:i:s'),
             ],
         ];
 
@@ -259,8 +259,8 @@ class RegisterController extends Controller
                     ->map(fn (CashRegister $s) => [
                         'id' => $s->id,
                         'cashier' => $s->user?->name,
-                        'opened_at' => $s->opened_at?->format('H:i'),
-                        'closed_at' => $s->closed_at?->format('H:i'),
+                        'opened_at' => ($s->opened_at ? \App\Models\Setting::formatDateTime($s->opened_at, 'H:i') : null),
+                        'closed_at' => ($s->closed_at ? \App\Models\Setting::formatDateTime($s->closed_at, 'H:i') : null),
                         'orders_count' => $s->orders_count,
                         'total_sales' => (float) $s->total_sales,
                         'opening_balance' => (float) $s->opening_balance,
@@ -277,7 +277,7 @@ class RegisterController extends Controller
                     'id' => $register->id,
                     'mode' => $register->mode,
                     'cashier_name' => $register->user?->name ?? Auth::user()?->name,
-                    'opened_at' => $register->opened_at->format('Y-m-d H:i:s'),
+                    'opened_at' => \App\Models\Setting::formatDateTime($register->opened_at, 'Y-m-d H:i:s'),
                     'opening_balance' => $register->opening_balance,
                     'cash_sales' => $register->cash_sales,
                     'card_sales' => $register->card_sales,
@@ -378,15 +378,18 @@ class RegisterController extends Controller
 
         $result = $printer->openCashDrawer();
 
-        activity()
-            ->causedBy(Auth::user())
-            ->performedOn($register)
-            ->withProperties([
-                'success' => (bool) ($result['success'] ?? false),
-                'printer_ip' => $result['printer_ip'] ?? null,
-                'message' => $result['message'] ?? null,
-            ])
-            ->log('Cash drawer open requested');
+        // activity() comes from spatie/laravel-activitylog — may be absent on some installs
+        if (function_exists('\\activity')) {
+            \activity()
+                ->causedBy(Auth::user())
+                ->performedOn($register)
+                ->withProperties([
+                    'success' => (bool) ($result['success'] ?? false),
+                    'printer_ip' => $result['printer_ip'] ?? null,
+                    'message' => $result['message'] ?? null,
+                ])
+                ->log('Cash drawer open requested');
+        }
 
         // Always OK to return kick bytes for Local Print Bridge (USB)
         $hasPayload = ! empty($result['payload_base64']);
@@ -510,8 +513,8 @@ class RegisterController extends Controller
             'shifts' => $shifts->map(fn (CashRegister $s) => [
                 'id' => $s->id,
                 'cashier' => $s->user?->name,
-                'opened_at' => $s->opened_at?->format('H:i'),
-                'closed_at' => $s->closed_at?->format('H:i'),
+                'opened_at' => ($s->opened_at ? \App\Models\Setting::formatDateTime($s->opened_at, 'H:i') : null),
+                'closed_at' => ($s->closed_at ? \App\Models\Setting::formatDateTime($s->closed_at, 'H:i') : null),
                 'orders_count' => (int) $s->orders_count,
                 'total_sales' => (float) $s->total_sales,
                 'difference' => (float) ($s->difference ?? 0),

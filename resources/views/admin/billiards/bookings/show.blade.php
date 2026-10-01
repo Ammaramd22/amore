@@ -288,7 +288,7 @@
                     </div>
                     <div class="info-cell wide">
                         <div class="k">When</div>
-                        <div class="v">{{ $booking->scheduled_start?->format('d M Y H:i') }} → {{ $booking->scheduled_end?->format('H:i') }}</div>
+                        <div class="v">{{ \App\Models\Setting::formatDateTime($booking->scheduled_start, 'd M Y H:i') }} → {{ \App\Models\Setting::formatDateTime($booking->scheduled_end, 'H:i') }}</div>
                     </div>
                     <div class="info-cell">
                         <div class="k">Hours</div>

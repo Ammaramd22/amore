@@ -142,8 +142,8 @@
                 <header class="pf-section-head">
                     <span class="pf-step">3</span>
                     <div>
-                        <h3>Portions &amp; add-ons</h3>
-                        <p>Optional. Half/Full sizes and extras like cheese.</p>
+                        <h3>Variations &amp; modifiers</h3>
+                        <p>Optional. Sizes/portions set the base sellable price; modifiers are extras.</p>
                     </div>
                 </header>
                 <div class="pf-section-body">
@@ -151,50 +151,89 @@
                         <div class="col-md-6">
                             <div class="pf-list-card">
                                 <div class="pf-list-head">
-                                    <strong>Portions / sizes</strong>
+                                    <strong>Variations</strong>
                                     <button type="button" class="btn btn-sm btn-outline-primary" onclick="addVariantRow()"><i class="fas fa-plus me-1"></i>Add</button>
                                 </div>
                                 <div id="variantRows" class="pf-list-body">
                                     @forelse($product->variants as $i => $variant)
+                                    @php $finalPrice = (float) $product->final_price + (float) $variant->price_adjustment; @endphp
                                     <div class="pf-row variant-row">
                                         <input type="hidden" name="variants[{{ $i }}][id]" value="{{ $variant->id }}">
-                                        <input type="text" name="variants[{{ $i }}][name]" class="form-control" value="{{ $variant->name }}" placeholder="e.g. Half / Full">
-                                        <input type="number" step="0.01" name="variants[{{ $i }}][price_adjustment]" class="form-control" value="{{ $variant->price_adjustment }}" placeholder="Adj.">
+                                        <input type="text" name="variants[{{ $i }}][name]" class="form-control" value="{{ $variant->name }}" placeholder="e.g. Small / Medium">
+                                        <input type="number" step="0.01" name="variants[{{ $i }}][price_adjustment]" class="form-control variant-adj" value="{{ $variant->price_adjustment }}" placeholder="Adj." oninput="updateVariantFinalHints()">
+                                        <span class="variant-final text-muted small text-nowrap" title="Final sell price">= {{ number_format($finalPrice, 2) }}</span>
                                         <button type="button" class="btn btn-icon danger" onclick="this.closest('.variant-row').remove()" aria-label="Remove"><i class="fas fa-times"></i></button>
                                     </div>
                                     @empty
                                     <div class="pf-row variant-row">
-                                        <input type="text" name="variants[0][name]" class="form-control" placeholder="e.g. Half">
-                                        <input type="number" step="0.01" name="variants[0][price_adjustment]" class="form-control" value="0" placeholder="Adj.">
+                                        <input type="text" name="variants[0][name]" class="form-control" placeholder="e.g. Small">
+                                        <input type="number" step="0.01" name="variants[0][price_adjustment]" class="form-control variant-adj" value="0" placeholder="Adj." oninput="updateVariantFinalHints()">
+                                        <span class="variant-final text-muted small text-nowrap" title="Final sell price">= {{ number_format((float) $product->final_price, 2) }}</span>
                                         <button type="button" class="btn btn-icon danger" onclick="this.closest('.variant-row').remove()" aria-label="Remove"><i class="fas fa-times"></i></button>
                                     </div>
                                     @endforelse
                                 </div>
                                 <button type="button" class="btn btn-sm btn-light border mt-2" onclick="addHalfFull()">Half + Full presets</button>
-                                <div class="form-text mt-1">Adjustment is added to selling price (use negative for cheaper half).</div>
+                                <div class="form-text mt-1">Final price = product selling price + adjustment. Example: selling 700, Medium +200 → Medium shows as 900.</div>
                             </div>
                         </div>
                         <div class="col-md-6">
                             <div class="pf-list-card">
                                 <div class="pf-list-head">
-                                    <strong>Shared add-ons</strong>
-                                    <a href="{{ route('addons.create') }}" class="btn btn-sm btn-outline-secondary" target="_blank"><i class="fas fa-external-link-alt me-1"></i>Manage</a>
+                                    <strong>Modifier sets</strong>
+                                    <a href="{{ route('addon-groups.create') }}" class="btn btn-sm btn-outline-secondary" target="_blank"><i class="fas fa-external-link-alt me-1"></i>Manage</a>
                                 </div>
-                                <div class="pf-list-body" style="max-height:220px;overflow:auto;">
+                                <div class="pf-list-body" style="max-height:160px;overflow:auto;">
+                                    @php $selectedGroups = old('addon_group_ids', $selectedAddonGroupIds ?? []); @endphp
+                                    @forelse(($catalogAddonGroups ?? collect()) as $group)
+                                    <div class="form-check mb-1">
+                                        <input class="form-check-input" type="checkbox" name="addon_group_ids[]" value="{{ $group->id }}" id="addon_group_{{ $group->id }}"
+                                            {{ in_array($group->id, $selectedGroups) ? 'checked' : '' }}>
+                                        <label class="form-check-label" for="addon_group_{{ $group->id }}">
+                                            {{ $group->name }} <span class="text-muted">({{ $group->addons_count }} modifiers)</span>
+                                        </label>
+                                    </div>
+                                    @empty
+                                    <div class="text-muted small">No modifier sets yet. Create them under Menu Management → Modifiers.</div>
+                                    @endforelse
+                                </div>
+                                <div class="pf-list-head border-top">
+                                    <strong>Option sets</strong>
+                                    <a href="{{ route('option-sets.create') }}" class="btn btn-sm btn-outline-secondary" target="_blank"><i class="fas fa-external-link-alt me-1"></i>Manage</a>
+                                </div>
+                                <div class="pf-list-body" style="max-height:160px;overflow:auto;">
+                                    @php $selectedOpts = old('option_set_ids', $selectedOptionSetIds ?? []); @endphp
+                                    @forelse(($catalogOptionSets ?? collect()) as $os)
+                                    <div class="form-check mb-1">
+                                        <input class="form-check-input" type="checkbox" name="option_set_ids[]" value="{{ $os->id }}" id="option_set_{{ $os->id }}"
+                                            {{ in_array($os->id, $selectedOpts) ? 'checked' : '' }}>
+                                        <label class="form-check-label" for="option_set_{{ $os->id }}">
+                                            {{ $os->name }} <span class="text-muted">({{ $os->options_count }} options)</span>
+                                        </label>
+                                    </div>
+                                    @empty
+                                    <div class="text-muted small">No option sets yet. Create Milk / Sugar / Ice under Menu Management → Option Sets.</div>
+                                    @endforelse
+                                </div>
+                                <div class="pf-list-head border-top">
+                                    <strong>Individual modifiers</strong>
+                                    <a href="{{ route('addon-groups.create') }}" class="btn btn-sm btn-outline-secondary" target="_blank"><i class="fas fa-external-link-alt me-1"></i>Create</a>
+                                </div>
+                                <div class="pf-list-body" style="max-height:160px;overflow:auto;">
                                     @php $selectedShared = old('shared_addon_ids', $selectedSharedAddonIds ?? []); @endphp
                                     @forelse(($catalogAddons ?? collect()) as $ca)
                                     <div class="form-check mb-1">
                                         <input class="form-check-input" type="checkbox" name="shared_addon_ids[]" value="{{ $ca->id }}" id="shared_addon_{{ $ca->id }}"
                                             {{ in_array($ca->id, $selectedShared) ? 'checked' : '' }}>
                                         <label class="form-check-label" for="shared_addon_{{ $ca->id }}">
-                                            {{ $ca->name }} <span class="text-muted">({{ number_format((float) $ca->price, 2) }})</span>
+                                            {{ $ca->name }} <span class="text-muted">(+{{ number_format((float) $ca->price, 2) }})</span>
                                         </label>
                                     </div>
                                     @empty
-                                    <div class="text-muted small">No shared add-ons yet. Create them under Menu Management → Add-ons.</div>
+                                    <div class="text-muted small">No modifiers yet. Create them under Menu Management → Modifiers.</div>
                                     @endforelse
                                 </div>
-                                <div class="form-text px-2 pb-2">Or add a one-off below (also saved to the shared catalog).</div>
+                                <div class="form-text px-2 pb-2">Or quick-add a one-off below (also saved to the shared catalog).</div>
                                 <div class="pf-list-head border-top">
                                     <strong>Quick add</strong>
                                     <button type="button" class="btn btn-sm btn-outline-primary" onclick="addAddonRow()"><i class="fas fa-plus me-1"></i>Add</button>
@@ -462,14 +501,28 @@ let addonIdx = {{ max($product->addons->count(), 1) }};
 function addVariantRow(name = '', adj = 0) {
     const wrap = document.getElementById('variantRows');
     const i = variantIdx++;
+    const base = parseFloat(document.getElementById('selling_price')?.value || 0);
+    const final = (base + parseFloat(adj || 0)).toFixed(2);
     const row = document.createElement('div');
     row.className = 'pf-row variant-row';
     row.innerHTML = `
-        <input type="text" name="variants[${i}][name]" class="form-control" value="${name}" placeholder="e.g. Half / Full">
-        <input type="number" step="0.01" name="variants[${i}][price_adjustment]" class="form-control" value="${adj}" placeholder="Adj.">
+        <input type="text" name="variants[${i}][name]" class="form-control" value="${name}" placeholder="e.g. Small / Medium">
+        <input type="number" step="0.01" name="variants[${i}][price_adjustment]" class="form-control variant-adj" value="${adj}" placeholder="Adj." oninput="updateVariantFinalHints()">
+        <span class="variant-final text-muted small text-nowrap" title="Final sell price">= ${final}</span>
         <button type="button" class="btn btn-icon danger" onclick="this.closest('.variant-row').remove()" aria-label="Remove"><i class="fas fa-times"></i></button>`;
     wrap.appendChild(row);
 }
+
+function updateVariantFinalHints() {
+    const base = parseFloat(document.getElementById('selling_price')?.value || 0);
+    document.querySelectorAll('#variantRows .variant-row').forEach(row => {
+        const adj = parseFloat(row.querySelector('.variant-adj')?.value || 0);
+        const hint = row.querySelector('.variant-final');
+        if (hint) hint.textContent = '= ' + (base + adj).toFixed(2);
+    });
+}
+
+document.getElementById('selling_price')?.addEventListener('input', updateVariantFinalHints);
 
 function addAddonRow(name = '', price = 0) {
     const wrap = document.getElementById('addonRows');

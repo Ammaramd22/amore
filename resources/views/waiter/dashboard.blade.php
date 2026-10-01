@@ -521,6 +521,10 @@
     </audio>
 
     <script>
+        function smartWaiterInterval(fn, ms) {
+            return setInterval(function () { if (document.hidden) return; fn(); }, ms);
+        }
+
         const csrf = document.querySelector('meta[name="csrf-token"]').content;
         const bringBillEnabled = @json((bool) ($bringBillEnabled ?? true));
         const kotConfirmationEnabled = @json((bool) ($kotConfirmationEnabled ?? true));
@@ -1213,7 +1217,7 @@
         }
         if (ratingEnabled) setNavBadge('navBadgeRate', {{ (int) $stats['awaiting_rating'] }});
 
-        setInterval(() => {
+        smartWaiterInterval(() => {
             pollQrOrders();
             refreshStats();
             if (currentView === 'kitchen' && kotConfirmationEnabled) {

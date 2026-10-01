@@ -129,8 +129,8 @@
                     <tr>
                         <td>{{ $shift->id }}</td>
                         <td class="fw-semibold">{{ $shift->user?->name ?? '—' }}</td>
-                        <td>{{ $shift->opened_at?->format('H:i') }}</td>
-                        <td>{{ $shift->closed_at?->format('H:i') }}</td>
+                        <td>{{ \App\Models\Setting::formatDateTime($shift->opened_at, 'H:i') }}</td>
+                        <td>{{ \App\Models\Setting::formatDateTime($shift->closed_at, 'H:i') }}</td>
                         <td class="text-end">{{ number_format($shift->opening_balance, 2) }}</td>
                         <td class="text-end">{{ number_format($shift->closing_balance, 2) }}</td>
                         <td class="text-end {{ $sDiff >= 0 ? 'text-success' : 'text-danger' }}">{{ ($sDiff >= 0 ? '+' : '') . number_format($sDiff, 2) }}</td>
@@ -184,8 +184,8 @@
                     @foreach($dayShifts as $shift)
                     <tr>
                         <td>{{ $shift->user?->name ?? '—' }}</td>
-                        <td>{{ $shift->opened_at?->format('Y-m-d H:i') }}</td>
-                        <td>{{ $shift->closed_at?->format('H:i') }}</td>
+                        <td>{{ \App\Models\Setting::formatDateTime($shift->opened_at, 'Y-m-d H:i') }}</td>
+                        <td>{{ \App\Models\Setting::formatDateTime($shift->closed_at, 'H:i') }}</td>
                         <td class="text-end">{{ number_format($shift->total_sales, 2) }}</td>
                         <td class="text-end">{{ $shift->orders_count }}</td>
                     </tr>

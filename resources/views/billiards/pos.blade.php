@@ -388,7 +388,7 @@
                         <a class="session-item" href="{{ route('billiards.bookings.show', $b) }}">
                             <div>
                                 <div class="t">{{ $b->table?->name }} · {{ $b->displayName() }}</div>
-                                <div class="m">{{ $b->booking_number }} · {{ $b->scheduled_start?->format('H:i') }}–{{ $b->scheduled_end?->format('H:i') }} · {{ ucfirst($b->payment_status) }}</div>
+                                <div class="m">{{ $b->booking_number }} · {{ \App\Models\Setting::formatDateTime($b->scheduled_start, 'H:i') }}–{{ \App\Models\Setting::formatDateTime($b->scheduled_end, 'H:i') }} · {{ ucfirst($b->payment_status) }}</div>
                             </div>
                             <span style="font-weight:800;font-size:.85rem;color:#c45c12">{{ $cur }} {{ number_format((float)$b->amount,0) }}</span>
                         </a>
@@ -1055,7 +1055,7 @@
         return (over?'+':'') + pad(Math.floor(a/60)) + ':' + pad(a%60);
     }
     function tick(){
-        el('clockLive').textContent = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+        el('clockLive').textContent = (window.BusinessClock ? BusinessClock.formatTime(true) : new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'}));
         document.querySelectorAll('.btile[data-ends]').forEach(tile => {
             const ends = Number(tile.dataset.ends);
             if (!ends) return;

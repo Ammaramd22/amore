@@ -340,6 +340,7 @@
             50% { transform: translateY(-10px); }
         }
     </style>
+    @include('partials.business-clock')
 </head>
 <body>
     <div class="header">
@@ -378,10 +379,11 @@
 
     <script>
         function updateClock() {
-            const now = new Date();
-            document.getElementById('clock').textContent = now.toLocaleTimeString('en-US', {
-                hour: '2-digit', minute: '2-digit', hour12: true
-            });
+            const el = document.getElementById('clock');
+            if (!el) return;
+            el.textContent = window.BusinessClock
+                ? BusinessClock.formatTime(false)
+                : new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
         }
         setInterval(updateClock, 1000);
         updateClock();

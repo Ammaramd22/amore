@@ -27,6 +27,13 @@ class Addon extends Model
         return $this->belongsToMany(Product::class, 'addon_product')->withTimestamps();
     }
 
+    public function groups()
+    {
+        return $this->belongsToMany(AddonGroup::class, 'addon_group_addon')
+            ->withPivot(['display_order'])
+            ->withTimestamps();
+    }
+
     public function scopeActive($query)
     {
         return $query->where('is_active', true);
