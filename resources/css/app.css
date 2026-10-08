@@ -1,0 +1,82 @@
+@import 'tailwindcss';
+
+@source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
+@source '../../storage/framework/views/*.php';
+@source '../**/*.blade.php';
+@source '../**/*.js';
+
+@theme {
+    --font-sans: 'Inter', 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
+        'Segoe UI Symbol', 'Noto Color Emoji';
+
+    --color-primary-50: #eef2ff;
+    --color-primary-100: #e0e7ff;
+    --color-primary-200: #c7d2fe;
+    --color-primary-300: #a5b4fc;
+    --color-primary-400: #818cf8;
+    --color-primary-500: #6366f1;
+    --color-primary-600: #4f46e5;
+    --color-primary-700: #4338ca;
+    --color-primary-800: #3730a3;
+    --color-primary-900: #312e81;
+
+    --color-surface-50: #f8fafc;
+    --color-surface-100: #f1f5f9;
+    --color-surface-200: #e2e8f0;
+    --color-surface-300: #cbd5e1;
+    --color-surface-400: #94a3b8;
+    --color-surface-500: #64748b;
+    --color-surface-600: #475569;
+    --color-surface-700: #334155;
+    --color-surface-800: #1e293b;
+    --color-surface-900: #0f172a;
+
+    --radius-sm: 0.5rem;
+    --radius-md: 0.75rem;
+    --radius-lg: 1rem;
+    --radius-xl: 1.25rem;
+    --radius-2xl: 1.5rem;
+
+    --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.05), 0 4px 20px rgba(0, 0, 0, 0.03);
+    --shadow-card-hover: 0 4px 20px rgba(0, 0, 0, 0.08);
+    --shadow-dropdown: 0 10px 40px rgba(0, 0, 0, 0.12);
+    --shadow-modal: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+}
+
+/* Allow dropdowns to overflow table-responsive containers */
+.table-responsive:has(.dropdown) {
+    overflow: visible;
+}
+
+/* Reusable black-bordered table */
+.table-black-borders {
+    border: 2px solid #000;
+}
+.table-black-borders thead th {
+    border: 2px solid #000;
+    font-weight: 600;
+}
+.table-black-borders td {
+    border: 2px solid #000;
+}
+
+/* Black-bordered form controls */
+.form-black-border .form-control,
+.form-black-border .form-select {
+    border: 2px solid #000;
+}
+
+/* Index filter bar */
+.index-filter-form .form-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
+}
+.index-filter-form .form-control,
+.index-filter-form .form-select {
+    padding: 8px 12px;
+    font-size: 0.85rem;
+}

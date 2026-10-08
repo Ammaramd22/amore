@@ -1,0 +1,18 @@
+﻿Amore POS — Option Sets (Edit Option Set) update
+
+Menu Management → Option Sets → Create / Edit
+
+Restaurant examples: Milk Type, Sugar Level, Ice Level, Spice Level
+
+Distinct from Variations (priced sizes) and Modifiers (priced extras).
+
+cPanel (NO Terminal):
+1. BACKUP site + MySQL
+2. Upload ZIP to Laravel root (artisan + .env folder)
+3. Extract OVERWRITE — keep .env
+4. Open https://YOUR-DOMAIN/migrate-update.php
+5. Unlock with APP_KEY → Run migrate + clear cache
+6. Hard refresh Admin/POS/Waiter (Ctrl+F5)
+7. DELETE migrate-update.php + this ZIP
+
+Creates: option_sets, options, option_set_product, order_item_options

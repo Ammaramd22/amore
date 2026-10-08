@@ -1,0 +1,28 @@
+Amore QRPOS — Products Page Giant Icon / Pagination Fix
+======================================================
+
+NO TERMINAL REQUIRED.
+
+BUG
+---
+Products (and other list pages) showed a HUGE grey/blue chevron covering the page.
+Cause: Laravel default Tailwind pagination SVGs (w-5 h-5) have no size without
+Tailwind CSS, so AdminLTE/Bootstrap scales them to full content width.
+
+FIX
+---
+1. Force Bootstrap 5 pagination in AppServiceProvider
+2. CSS safety cap on pagination/table SVGs and images
+
+INSTALL (cPanel File Manager)
+-----------------------------
+1. Extract this ZIP.
+2. Upload into Laravel project ROOT (overwrite):
+   - app/Providers/AppServiceProvider.php
+   - resources/views/layouts/admin.blade.php
+3. Open once then DELETE:
+   https://YOUR-DOMAIN/clear-views.php
+   (or delete files inside storage/framework/views/ manually)
+4. Hard refresh Products page (Ctrl+F5).
+
+Pagination should show normal Previous / 1 / 2 / Next buttons.

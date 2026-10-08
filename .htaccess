@@ -1,0 +1,45 @@
+# ResPOS / Laravel — document root = project root
+# Forwards all web traffic into /public (prefer setting vhost root to /public when possible)
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Keep Authorization / CSRF headers for API & Sanctum
+    RewriteCond %{HTTP:Authorization} .
+    RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
+    RewriteCond %{HTTP:x-xsrf-token} .
+    RewriteRule .* - [E=HTTP_X_XSRF_TOKEN:%{HTTP:X-XSRF-Token}]
+
+    # If request is already under /public, stop
+    RewriteRule ^public(/|$) - [L]
+
+    # Block sensitive paths at the project root.
+    # Do NOT block plain /storage/* — that is Laravel’s public media URL
+    # (logos, products). Only block internal storage dirs.
+    RewriteRule ^(\.env|composer\.(json|lock)|artisan|vendor|bootstrap|database|tests|node_modules)(/|$) - [F,L]
+    RewriteRule ^storage/(app|framework|logs)(/|$) - [F,L]
+
+    # Existing file or directory under public/ → serve it
+    RewriteCond %{REQUEST_URI} !^/public/
+    RewriteCond %{DOCUMENT_ROOT}/public%{REQUEST_URI} -f [OR]
+    RewriteCond %{DOCUMENT_ROOT}/public%{REQUEST_URI} -d
+    RewriteRule ^(.*)$ public/$1 [L]
+
+    # Everything else → public/index.php (Laravel front controller)
+    RewriteRule ^(.*)$ public/index.php [L]
+</IfModule>
+
+# Deny direct access to hidden files in the project root
+<IfModule mod_authz_core.c>
+    <FilesMatch "^\.">
+        Require all denied
+    </FilesMatch>
+</IfModule>
+
+<IfModule !mod_authz_core.c>
+    <FilesMatch "^\.">
+        Order allow,deny
+        Deny from all
+    </FilesMatch>
+</IfModule>
